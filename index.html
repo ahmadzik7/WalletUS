@@ -798,8 +798,22 @@
   }
   .fab:active { transform: scale(.9); }
 
-  /* ── Bottom nav: fully hidden ── */
-  .bottom-nav { display: none !important; }
+    /* Tombol tambah akun khusus mobile */
+    .accounts-add-mobile {
+      display: none;
+    }
+    @media (max-width: 768px) {
+      .accounts-add-mobile {
+        display: flex;
+        width: 100%;
+        justify-content: center;
+        padding: 16px;
+        font-size: 15px;
+        border-radius: 14px;
+        margin-bottom: 16px;
+        min-height: 54px;
+      }
+    }
 
   /* ── Horizontal scroll stats ── */
   .stats-scroll {
@@ -829,7 +843,12 @@
 
     .page-header { margin-bottom: 14px; flex-wrap: wrap; gap: 10px; }
     .page-title { font-size: 22px; }
-    .page-header > .btn-primary { display: none; }
+    /* Sembunyikan tombol header di halaman yang pakai FAB, kecuali halaman Akun & Sheets */
+    #page-dashboard .page-header > .btn-primary,
+    #page-transactions .page-header > .btn-primary,
+    #page-transfer .page-header > .btn-primary,
+    #page-summary .page-header > .btn-primary,
+    #page-shopping .page-header > .btn-primary { display: none; }
     .page-header .btn-ghost { display: inline-flex; font-size: 12px; padding: 8px 12px; }
 
     .two-col { grid-template-columns: 1fr !important; }
@@ -1288,6 +1307,8 @@
       </div>
       <button class="btn btn-primary" onclick="openModal('account')">+ Tambah Akun</button>
     </div>
+    <!-- Tombol khusus mobile, full width, mudah dipencet -->
+    <button class="btn btn-primary accounts-add-mobile" onclick="openModal('account')">+ Tambah Akun Baru</button>
     <div class="accounts-grid" id="all-accounts-grid"></div>
   </div>
 
@@ -1379,53 +1400,59 @@
             <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
               <button class="copy-btn" onclick="copyScript()">📋 Copy Script</button>
             </div>
-            <pre class="code-block" id="apps-script">// WalletUS Apps Script — Full Sync
+            <pre class="code-block" id="apps-script">// WalletUS Apps Script v3 — Sync 2 Arah
+// Semua aksi lewat POST (menghindari masalah CORS pada GET dengan parameter)
+
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var data = JSON.parse(e.postData.contents);
 
+    // ── GET ALL: HP tarik semua data dari Sheets ──
+    if (data.action === 'get_all') {
+      return getData(ss);
+    }
+
+    // ── PUSH ALL: HP kirim semua data ke Sheets ──
     if (data.action === 'push_all') {
-      // Push semua data sekaligus
-      var txSheet = ss.getSheetByName('Transactions');
-      txSheet.clearContents();
-      txSheet.appendRow(['id','date','desc','category','accountId',
-        'accountName','type','amount','note','toAccountId','toAccountName']);
-      data.transactions.forEach(function(t) {
-        txSheet.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'',
-          t.accountId||'', t.accountName||'', t.type||'',
-          t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
-      });
-
-      var accSheet = ss.getSheetByName('Accounts');
-      accSheet.clearContents();
-      accSheet.appendRow(['id','name','balance','type','color']);
-      data.accounts.forEach(function(a) {
-        accSheet.appendRow([a.id||'', a.name||'', a.balance||0, a.type||'', a.color||'']);
-      });
-
+      writeTransactions(ss, data.transactions);
+      writeAccounts(ss, data.accounts);
       return ok('push_all done');
     }
 
+    // ── ADD TRANSACTION: 1 transaksi baru + update akun ──
     if (data.action === 'add_transaction') {
-      var txSheet = ss.getSheetByName('Transactions');
-      if (txSheet.getLastRow() === 0) {
+      var txSheet = getOrCreate(ss, 'Transactions');
+      if (txSheet.getLastRow() === 0)
         txSheet.appendRow(['id','date','desc','category','accountId',
           'accountName','type','amount','note','toAccountId','toAccountName']);
-      }
       var t = data.tx;
-      txSheet.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'',
-        t.accountId||'', t.accountName||'', t.type||'',
-        t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
-      syncAccounts(ss, data.accounts);
+      txSheet.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',
+        t.accountId||'',t.accountName||'',t.type||'',
+        t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);
+      writeAccounts(ss, data.accounts);
       return ok('tx added');
     }
 
+    // ── SYNC ACCOUNTS: update saldo akun saja ──
     if (data.action === 'sync_accounts') {
-      syncAccounts(ss, data.accounts);
+      writeAccounts(ss, data.accounts);
       return ok('accounts synced');
     }
 
+    // ── DELETE TRANSACTION ──
+    if (data.action === 'delete_transaction') {
+      var txSheet = getOrCreate(ss, 'Transactions');
+      var rows = txSheet.getDataRange().getValues();
+      for (var i = rows.length - 1; i >= 1; i--) {
+        if (rows[i][0] == data.id) { txSheet.deleteRow(i + 1); break; }
+      }
+      writeAccounts(ss, data.accounts);
+      return ok('tx deleted');
+    }
+
+    return ok('no action matched');
+
   } catch(err) {
     return ContentService.createTextOutput(
       JSON.stringify({status:'error', msg: err.toString()})
@@ -1433,59 +1460,73 @@ function doPost(e) {
   }
 }
 
-function syncAccounts(ss, accounts) {
-  var accSheet = ss.getSheetByName('Accounts');
-  accSheet.clearContents();
-  accSheet.appendRow(['id','name','balance','type','color']);
-  accounts.forEach(function(a) {
-    accSheet.appendRow([a.id||'', a.name||'', a.balance||0, a.type||'', a.color||'']);
+// doGet hanya untuk cek status (ping)
+function doGet(e) {
+  return ContentService.createTextOutput(
+    JSON.stringify({status:'ok', msg:'WalletUS script aktif'})
+  ).setMimeType(ContentService.MimeType.JSON);
+}
+
+// ── Helpers ──
+function getData(ss) {
+  var txSheet = getOrCreate(ss, 'Transactions');
+  var accSheet = getOrCreate(ss, 'Accounts');
+
+  var transactions = [];
+  if (txSheet.getLastRow() > 1) {
+    var d = txSheet.getDataRange().getValues();
+    var h = d[0];
+    for (var i = 1; i < d.length; i++) {
+      var obj = {};
+      h.forEach(function(k, idx) { obj[k] = d[i][idx]; });
+      if (obj.id) transactions.push(obj);
+    }
+  }
+
+  var accounts = [];
+  if (accSheet.getLastRow() > 1) {
+    var d2 = accSheet.getDataRange().getValues();
+    var h2 = d2[0];
+    for (var j = 1; j < d2.length; j++) {
+      var obj2 = {};
+      h2.forEach(function(k, idx) { obj2[k] = d2[j][idx]; });
+      if (obj2.id) accounts.push(obj2);
+    }
+  }
+
+  return ContentService.createTextOutput(
+    JSON.stringify({status:'ok', transactions:transactions, accounts:accounts})
+  ).setMimeType(ContentService.MimeType.JSON);
+}
+
+function writeTransactions(ss, txs) {
+  var sheet = getOrCreate(ss, 'Transactions');
+  sheet.clearContents();
+  sheet.appendRow(['id','date','desc','category','accountId',
+    'accountName','type','amount','note','toAccountId','toAccountName']);
+  (txs||[]).forEach(function(t) {
+    sheet.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',
+      t.accountId||'',t.accountName||'',t.type||'',
+      t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);
   });
 }
 
-function doGet(e) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var txSheet = ss.getSheetByName('Transactions');
-    var accSheet = ss.getSheetByName('Accounts');
+function writeAccounts(ss, accs) {
+  var sheet = getOrCreate(ss, 'Accounts');
+  sheet.clearContents();
+  sheet.appendRow(['id','name','balance','type','color']);
+  (accs||[]).forEach(function(a) {
+    sheet.appendRow([a.id||'',a.name||'',a.balance||0,a.type||'',a.color||'']);
+  });
+}
 
-    var transactions = [];
-    if (txSheet && txSheet.getLastRow() > 1) {
-      var txData = txSheet.getDataRange().getValues();
-      var headers = txData[0];
-      for (var i = 1; i < txData.length; i++) {
-        var row = txData[i];
-        var obj = {};
-        headers.forEach(function(h, idx) { obj[h] = row[idx]; });
-        if (obj.id) transactions.push(obj);
-      }
-    }
-
-    var accounts = [];
-    if (accSheet && accSheet.getLastRow() > 1) {
-      var accData = accSheet.getDataRange().getValues();
-      var aHeaders = accData[0];
-      for (var j = 1; j < accData.length; j++) {
-        var aRow = accData[j];
-        var aObj = {};
-        aHeaders.forEach(function(h, idx) { aObj[h] = aRow[idx]; });
-        if (aObj.id) accounts.push(aObj);
-      }
-    }
-
-    return ContentService.createTextOutput(
-      JSON.stringify({status:'ok', transactions: transactions, accounts: accounts})
-    ).setMimeType(ContentService.MimeType.JSON);
-
-  } catch(err) {
-    return ContentService.createTextOutput(
-      JSON.stringify({status:'error', msg: err.toString()})
-    ).setMimeType(ContentService.MimeType.JSON);
-  }
+function getOrCreate(ss, name) {
+  return ss.getSheetByName(name) || ss.insertSheet(name);
 }
 
 function ok(msg) {
   return ContentService.createTextOutput(
-    JSON.stringify({status:'ok', msg: msg})
+    JSON.stringify({status:'ok', msg:msg})
   ).setMimeType(ContentService.MimeType.JSON);
 }</pre>
           </div>
@@ -2246,6 +2287,13 @@ function deleteTx(id) {
 
   state.transactions = state.transactions.filter(t => t.id !== id);
   saveState();
+  // Sync hapus ke Sheets
+  if (state.sheetUrl) {
+    fetch(state.sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'delete_transaction', id: id, accounts: state.accounts })
+    }).catch(() => {});
+  }
   renderTransactions();
   toast('Transaksi dihapus');
 }
@@ -2700,36 +2748,48 @@ async function pullFromSheets() {
   setSheetStatus('⬇ Menarik data dari Google Sheets...', 'info');
   toast('Menarik data dari Sheets...');
   try {
-    const res = await fetch(state.sheetUrl + '?action=get_all&t=' + Date.now());
+    // Gunakan POST agar tidak kena CORS blocking pada GET dengan redirect
+    const res = await fetch(state.sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({ action: 'get_all' })
+    });
     const data = await res.json();
 
     if (data.status === 'ok') {
+      let changed = false;
       if (data.transactions && data.transactions.length > 0) {
-        // Normalize: amount harus number
         state.transactions = data.transactions.map(t => ({
           ...t,
           amount: parseFloat(t.amount) || 0
         }));
+        changed = true;
       }
       if (data.accounts && data.accounts.length > 0) {
         state.accounts = data.accounts.map(a => ({
           ...a,
           balance: parseFloat(a.balance) || 0
         }));
+        changed = true;
       }
       state.lastSync = Date.now();
       saveState();
       updateSyncStatusUI();
-      setSheetStatus('✓ Data berhasil ditarik dari Google Sheets! (' +
-        state.transactions.length + ' transaksi, ' +
-        state.accounts.length + ' akun)', 'success');
-      toast('Data berhasil ditarik dari Sheets! ✓');
-      renderDashboard();
+      setSheetStatus('✓ Berhasil! ' + state.transactions.length + ' transaksi & ' +
+        state.accounts.length + ' akun ditarik dari Sheets.', 'success');
+      toast('Sync berhasil! ✓');
+      if (changed) renderDashboard();
     } else {
       throw new Error(data.msg || 'Sheets kosong atau belum ada data');
     }
   } catch(e) {
-    setSheetStatus('⚠ Gagal tarik data. Pastikan script sudah di-deploy ulang dengan kode terbaru. Error: ' + e.message, 'error');
+    // Jika fetch error (network/CORS), tampilkan pesan yang jelas
+    const isNetwork = e.message.includes('fetch') || e.message.includes('network') || e.message.includes('Failed');
+    setSheetStatus(
+      isNetwork
+        ? '⚠ Gagal koneksi. Pastikan: (1) URL benar, (2) script sudah di-deploy ulang versi terbaru, (3) ada koneksi internet.'
+        : '⚠ Error: ' + e.message,
+      'error'
+    );
     toast('Gagal tarik data dari Sheets', 'error');
   }
 }
