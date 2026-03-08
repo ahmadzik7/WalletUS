@@ -1296,100 +1296,244 @@
     <div class="page-header">
       <div>
         <div class="page-title">Google Sheets</div>
-        <div class="page-subtitle">Integrasi & sync data kamu</div>
+        <div class="page-subtitle">Sinkronisasi 2 arah antar perangkat</div>
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:20px">
-      <div class="section-title">📊 Cara Integrasi Google Sheets</div>
-      <p style="color:var(--text2);font-size:14px;line-height:1.7;margin-bottom:16px">
-        Ikuti langkah berikut untuk menghubungkan WalletUS ke Google Sheets kamu. Data akan tersinkron secara otomatis via Google Apps Script.
-      </p>
-
-      <div style="display:flex;flex-direction:column;gap:16px">
-        <div class="card card-sm" style="border-color:rgba(124,111,247,.3)">
-          <div style="font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px">
-            <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">1</span>
-            Buat Google Sheet Baru
-          </div>
-          <p style="color:var(--text2);font-size:13px;line-height:1.6">Buka <strong>sheets.google.com</strong> → buat spreadsheet baru → beri nama "WalletUS Data". Buat 3 sheet tab: <code style="color:var(--accent2)">Transactions</code>, <code style="color:var(--accent2)">Accounts</code>, <code style="color:var(--accent2)">Summary</code></p>
+    <!-- STATUS CARD -->
+    <div class="card" style="margin-bottom:16px;border-color:rgba(124,111,247,.3)">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <div id="sync-indicator" style="width:10px;height:10px;border-radius:50%;background:var(--text3);flex-shrink:0"></div>
+        <div style="flex:1">
+          <div style="font-weight:700;font-size:14px" id="sync-status-text">Belum terhubung ke Google Sheets</div>
+          <div style="font-size:12px;color:var(--text2);margin-top:2px" id="sync-last-time">Masukkan URL untuk mulai sync</div>
         </div>
+        <button class="btn btn-ghost btn-sm" id="sync-btn" onclick="pullFromSheets()" style="display:none">⟳ Sync Sekarang</button>
+      </div>
+    </div>
 
-        <div class="card card-sm" style="border-color:rgba(78,205,196,.3)">
-          <div style="font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px">
-            <span style="background:var(--accent2);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">2</span>
-            Pasang Apps Script
+    <!-- URL INPUT -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-title">🔗 URL Apps Script</div>
+      <div style="display:flex;gap:8px;flex-direction:column">
+        <input type="text" id="sheet-url" class="form-input" placeholder="https://script.google.com/macros/s/...">
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-primary" style="flex:1" onclick="saveSheetUrl()">Simpan & Hubungkan</button>
+          <button class="btn btn-ghost" onclick="pullFromSheets()" id="pull-btn" style="display:none;flex:1">⬇ Tarik Data dari Sheets</button>
+        </div>
+      </div>
+      <div id="sheet-status" style="font-size:12px;margin-top:10px;padding:8px 12px;border-radius:8px;display:none"></div>
+    </div>
+
+    <!-- HOW IT WORKS -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-title">⚡ Cara Kerja Sync 2 Arah</div>
+      <div style="display:flex;flex-direction:column;gap:10px">
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:12px;background:var(--surface2);border-radius:10px">
+          <span style="font-size:20px;flex-shrink:0">📱➡️📊</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">HP → Sheets (otomatis)</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">Setiap transaksi baru, transfer, atau edit akun langsung dikirim ke Google Sheets</div>
           </div>
-          <p style="color:var(--text2);font-size:13px;line-height:1.6;margin-bottom:10px">Di Google Sheet → <strong>Extensions → Apps Script</strong> → paste kode berikut:</p>
-          <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
-            <button class="copy-btn" onclick="copyScript()">📋 Copy Script</button>
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:12px;background:var(--surface2);border-radius:10px">
+          <span style="font-size:20px;flex-shrink:0">📊➡️📱</span>
+          <div>
+            <div style="font-weight:600;font-size:13px">Sheets → HP (manual / otomatis saat buka)</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">Klik "Tarik Data" atau app otomatis sync saat pertama dibuka. Cocok untuk 2 HP berbagi data yang sama</div>
           </div>
-          <pre class="code-block" id="apps-script">function doPost(e) {
-  var sheet = SpreadsheetApp.getActiveSpreadsheet();
-  var data = JSON.parse(e.postData.contents);
-  
-  if (data.type === 'transaction') {
-    var txSheet = sheet.getSheetByName('Transactions');
-    txSheet.appendRow([
-      data.date, data.desc, data.category,
-      data.account, data.txType, data.amount, data.note
-    ]);
-  } else if (data.type === 'account') {
-    var accSheet = sheet.getSheetByName('Accounts');
-    // Update or insert account balance
-    var rows = accSheet.getDataRange().getValues();
-    var found = false;
-    for (var i = 0; i < rows.length; i++) {
-      if (rows[i][0] === data.name) {
-        accSheet.getRange(i+1, 2).setValue(data.balance);
-        found = true; break;
-      }
+        </div>
+        <div style="display:flex;gap:12px;align-items:flex-start;padding:12px;background:rgba(255,211,61,.06);border:1px solid rgba(255,211,61,.2);border-radius:10px">
+          <span style="font-size:20px;flex-shrink:0">⚠️</span>
+          <div>
+            <div style="font-weight:600;font-size:13px;color:var(--accent4)">Penting: 2 HP harus pakai URL yang sama</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">Copy-paste URL Apps Script yang sama ke kedua HP. Data akan tersinkron lewat Google Sheets sebagai "database" bersama</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SETUP GUIDE -->
+    <div class="card" style="margin-bottom:16px">
+      <div class="section-title" onclick="toggleSetupGuide()" style="cursor:pointer">
+        📋 Panduan Setup Apps Script
+        <span id="setup-toggle-icon" style="font-size:14px;color:var(--text3)">▼ Tampilkan</span>
+      </div>
+      <div id="setup-guide" style="display:none">
+        <div style="display:flex;flex-direction:column;gap:12px;margin-top:4px">
+
+          <div class="card card-sm" style="border-color:rgba(124,111,247,.3)">
+            <div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+              <span style="background:var(--accent);color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">1</span>
+              Buat Google Sheet Baru
+            </div>
+            <p style="color:var(--text2);font-size:13px;line-height:1.6">Buka <strong>sheets.google.com</strong> → buat spreadsheet baru → beri nama <strong>"WalletUS"</strong>. Buat 2 sheet tab: <code style="color:var(--accent2)">Transactions</code> dan <code style="color:var(--accent2)">Accounts</code></p>
+          </div>
+
+          <div class="card card-sm" style="border-color:rgba(78,205,196,.3)">
+            <div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+              <span style="background:var(--accent2);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">2</span>
+              Pasang Apps Script (versi lengkap dengan GET)
+            </div>
+            <p style="color:var(--text2);font-size:13px;margin-bottom:8px">Extensions → Apps Script → <strong>hapus semua kode lama</strong> → paste ini:</p>
+            <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
+              <button class="copy-btn" onclick="copyScript()">📋 Copy Script</button>
+            </div>
+            <pre class="code-block" id="apps-script">// WalletUS Apps Script — Full Sync
+function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var data = JSON.parse(e.postData.contents);
+
+    if (data.action === 'push_all') {
+      // Push semua data sekaligus
+      var txSheet = ss.getSheetByName('Transactions');
+      txSheet.clearContents();
+      txSheet.appendRow(['id','date','desc','category','accountId',
+        'accountName','type','amount','note','toAccountId','toAccountName']);
+      data.transactions.forEach(function(t) {
+        txSheet.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'',
+          t.accountId||'', t.accountName||'', t.type||'',
+          t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
+      });
+
+      var accSheet = ss.getSheetByName('Accounts');
+      accSheet.clearContents();
+      accSheet.appendRow(['id','name','balance','type','color']);
+      data.accounts.forEach(function(a) {
+        accSheet.appendRow([a.id||'', a.name||'', a.balance||0, a.type||'', a.color||'']);
+      });
+
+      return ok('push_all done');
     }
-    if (!found) accSheet.appendRow([data.name, data.balance, data.color]);
+
+    if (data.action === 'add_transaction') {
+      var txSheet = ss.getSheetByName('Transactions');
+      if (txSheet.getLastRow() === 0) {
+        txSheet.appendRow(['id','date','desc','category','accountId',
+          'accountName','type','amount','note','toAccountId','toAccountName']);
+      }
+      var t = data.tx;
+      txSheet.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'',
+        t.accountId||'', t.accountName||'', t.type||'',
+        t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
+      syncAccounts(ss, data.accounts);
+      return ok('tx added');
+    }
+
+    if (data.action === 'sync_accounts') {
+      syncAccounts(ss, data.accounts);
+      return ok('accounts synced');
+    }
+
+  } catch(err) {
+    return ContentService.createTextOutput(
+      JSON.stringify({status:'error', msg: err.toString()})
+    ).setMimeType(ContentService.MimeType.JSON);
   }
-  
-  return ContentService
-    .createTextOutput(JSON.stringify({status:'ok'}))
-    .setMimeType(ContentService.MimeType.JSON);
+}
+
+function syncAccounts(ss, accounts) {
+  var accSheet = ss.getSheetByName('Accounts');
+  accSheet.clearContents();
+  accSheet.appendRow(['id','name','balance','type','color']);
+  accounts.forEach(function(a) {
+    accSheet.appendRow([a.id||'', a.name||'', a.balance||0, a.type||'', a.color||'']);
+  });
 }
 
 function doGet(e) {
-  return ContentService
-    .createTextOutput(JSON.stringify({status:'healthy'}))
-    .setMimeType(ContentService.MimeType.JSON);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var txSheet = ss.getSheetByName('Transactions');
+    var accSheet = ss.getSheetByName('Accounts');
+
+    var transactions = [];
+    if (txSheet && txSheet.getLastRow() > 1) {
+      var txData = txSheet.getDataRange().getValues();
+      var headers = txData[0];
+      for (var i = 1; i < txData.length; i++) {
+        var row = txData[i];
+        var obj = {};
+        headers.forEach(function(h, idx) { obj[h] = row[idx]; });
+        if (obj.id) transactions.push(obj);
+      }
+    }
+
+    var accounts = [];
+    if (accSheet && accSheet.getLastRow() > 1) {
+      var accData = accSheet.getDataRange().getValues();
+      var aHeaders = accData[0];
+      for (var j = 1; j < accData.length; j++) {
+        var aRow = accData[j];
+        var aObj = {};
+        aHeaders.forEach(function(h, idx) { aObj[h] = aRow[idx]; });
+        if (aObj.id) accounts.push(aObj);
+      }
+    }
+
+    return ContentService.createTextOutput(
+      JSON.stringify({status:'ok', transactions: transactions, accounts: accounts})
+    ).setMimeType(ContentService.MimeType.JSON);
+
+  } catch(err) {
+    return ContentService.createTextOutput(
+      JSON.stringify({status:'error', msg: err.toString()})
+    ).setMimeType(ContentService.MimeType.JSON);
+  }
+}
+
+function ok(msg) {
+  return ContentService.createTextOutput(
+    JSON.stringify({status:'ok', msg: msg})
+  ).setMimeType(ContentService.MimeType.JSON);
 }</pre>
-        </div>
+          </div>
 
-        <div class="card card-sm" style="border-color:rgba(251,146,60,.3)">
-          <div style="font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px">
-            <span style="background:var(--orange);color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">3</span>
-            Deploy sebagai Web App
+          <div class="card card-sm" style="border-color:rgba(251,146,60,.3)">
+            <div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+              <span style="background:var(--orange);color:#fff;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">3</span>
+              Deploy Web App
+            </div>
+            <p style="color:var(--text2);font-size:13px;line-height:1.6">
+              Klik <strong>Deploy → New Deployment → Web App</strong><br>
+              • Execute as: <strong>Me</strong><br>
+              • Who has access: <strong>Anyone</strong><br>
+              Salin URL → paste di kolom di atas → Simpan & Hubungkan
+            </p>
           </div>
-          <p style="color:var(--text2);font-size:13px;line-height:1.6">Klik <strong>Deploy → New Deployment → Web App</strong>. Set "Execute as: Me" dan "Who has access: Anyone". Salin URL deployment-nya.</p>
-        </div>
 
-        <div class="card card-sm" style="border-color:rgba(74,222,128,.3)">
-          <div style="font-weight:700;margin-bottom:8px;display:flex;align-items:center;gap:8px">
-            <span style="background:var(--green);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">4</span>
-            Tempel URL ke Sini
+          <div class="card card-sm" style="border-color:rgba(74,222,128,.3)">
+            <div style="font-weight:700;margin-bottom:6px;display:flex;align-items:center;gap:8px">
+              <span style="background:var(--green);color:#000;width:22px;height:22px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:12px">4</span>
+              HP ke-2
+            </div>
+            <p style="color:var(--text2);font-size:13px;line-height:1.6">
+              Buka WalletUS di HP ke-2 → halaman Google Sheets → paste <strong>URL yang sama</strong> → Simpan → klik <strong>"Tarik Data dari Sheets"</strong>. Semua data akan muncul!
+            </p>
           </div>
-          <div class="sheet-input-row">
-            <input type="text" id="sheet-url" class="form-input" placeholder="https://script.google.com/macros/s/...">
-            <button class="btn btn-primary" onclick="saveSheetUrl()">Simpan & Test</button>
-          </div>
-          <div id="sheet-status" style="font-size:12px;color:var(--text3);margin-top:8px"></div>
         </div>
       </div>
     </div>
 
+    <!-- DANGER ZONE -->
+    <div class="card" style="margin-bottom:16px;border-color:rgba(248,113,113,.2)">
+      <div class="section-title" style="color:var(--text)">🔄 Sinkronisasi Manual</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="pushAllToSheets()">⬆ Push Semua Data ke Sheets</button>
+        <button class="btn btn-ghost btn-sm" onclick="pullFromSheets()">⬇ Tarik Semua Data dari Sheets</button>
+      </div>
+      <p style="font-size:11px;color:var(--text3);margin-top:10px">Push: kirim data HP ini ke Sheets (timpa Sheets). Tarik: ambil data dari Sheets ke HP ini (timpa HP).</p>
+    </div>
+
+    <!-- EXPORT -->
     <div class="card">
       <div class="section-title">📤 Export ke XLSX</div>
-      <p style="color:var(--text2);font-size:14px;margin-bottom:16px">Download data sebagai file Excel (.xlsx) siap import ke Google Sheets.</p>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <button class="btn btn-ghost" onclick="exportTransactionsXLSX()">⬇ Transaksi.xlsx</button>
-        <button class="btn btn-ghost" onclick="exportAccountsXLSX()">⬇ Akun.xlsx</button>
-        <button class="btn btn-ghost" onclick="exportSummaryXLSX()">⬇ Summary.xlsx</button>
-        <button class="btn btn-primary" onclick="exportAllXLSX()">⬇ Export Semua (1 File)</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportTransactionsXLSX()">⬇ Transaksi.xlsx</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportAccountsXLSX()">⬇ Akun.xlsx</button>
+        <button class="btn btn-ghost btn-sm" onclick="exportSummaryXLSX()">⬇ Summary.xlsx</button>
+        <button class="btn btn-primary btn-sm" onclick="exportAllXLSX()">⬇ Export Semua</button>
       </div>
     </div>
   </div>
@@ -1605,6 +1749,7 @@ function loadState() {
     ],
     activeShoppingList: 'sl1',
     sheetUrl: '',
+    lastSync: null,
     summaryPeriod: 'weekly'
   };
 }
@@ -2385,6 +2530,7 @@ function saveAccount() {
   if (!name) { toast('Nama akun harus diisi!','error'); return; }
   state.accounts.push({ id: 'acc_'+genId(), name, balance, type, color });
   saveState();
+  syncAccountsToSheets();
   closeModal('account');
   renderAllAccounts();
   toast('Akun berhasil ditambahkan!');
@@ -2394,6 +2540,7 @@ function deleteAccount(id) {
   if (!confirm('Hapus akun ini? Transaksi terkait tidak akan dihapus.')) return;
   state.accounts = state.accounts.filter(a => a.id !== id);
   saveState();
+  syncAccountsToSheets();
   renderAllAccounts();
   toast('Akun dihapus');
 }
@@ -2422,6 +2569,7 @@ function saveEditBalance() {
   acc.name = newName;
   acc.type = newType;
   saveState();
+  syncAccountsToSheets();
   closeModal('editbalance');
   renderAllAccounts();
   renderDashboard();
@@ -2429,50 +2577,216 @@ function saveEditBalance() {
 }
 
 // ═══════════════════════════════════════════════════
-// GOOGLE SHEETS SYNC
+// GOOGLE SHEETS — SYNC 2 ARAH
 // ═══════════════════════════════════════════════════
 function loadSheetUrl() {
   const url = state.sheetUrl || '';
-  document.getElementById('sheet-url').value = url;
-  document.getElementById('sheet-status').textContent = url ? '✓ URL tersimpan. Data akan sync otomatis.' : '';
-}
-
-function saveSheetUrl() {
-  const url = document.getElementById('sheet-url').value.trim();
-  state.sheetUrl = url;
-  saveState();
+  const urlEl = document.getElementById('sheet-url');
+  if (urlEl) urlEl.value = url;
+  updateSyncStatusUI();
+  // Auto pull saat pertama buka halaman jika URL sudah ada
   if (url) {
-    document.getElementById('sheet-status').textContent = '⟳ Testing connection...';
-    fetch(url).then(() => {
-      document.getElementById('sheet-status').textContent = '✓ Koneksi berhasil! Data akan sync otomatis.';
-      document.getElementById('sheet-status').style.color = 'var(--green)';
-      toast('Google Sheets terhubung!');
-    }).catch(() => {
-      document.getElementById('sheet-status').textContent = '✓ URL disimpan. (CORS error normal — sync POST akan tetap bekerja)';
-      document.getElementById('sheet-status').style.color = 'var(--accent4)';
-      toast('URL Google Sheets disimpan!');
-    });
+    const pullBtn = document.getElementById('pull-btn');
+    const syncBtn = document.getElementById('sync-btn');
+    if (pullBtn) pullBtn.style.display = 'flex';
+    if (syncBtn) syncBtn.style.display = 'flex';
   }
 }
 
+function updateSyncStatusUI() {
+  const indicator = document.getElementById('sync-indicator');
+  const statusText = document.getElementById('sync-status-text');
+  const lastTime = document.getElementById('sync-last-time');
+  if (!indicator) return;
+
+  if (!state.sheetUrl) {
+    indicator.style.background = 'var(--text3)';
+    if (statusText) statusText.textContent = 'Belum terhubung ke Google Sheets';
+    if (lastTime) lastTime.textContent = 'Masukkan URL Apps Script untuk mulai sync';
+    return;
+  }
+  indicator.style.background = 'var(--green)';
+  if (statusText) statusText.textContent = 'Terhubung ke Google Sheets ✓';
+  if (lastTime) lastTime.textContent = state.lastSync
+    ? 'Terakhir sync: ' + new Date(state.lastSync).toLocaleString('id-ID')
+    : 'Belum pernah sync — klik Tarik Data';
+}
+
+function setSheetStatus(msg, type) {
+  const el = document.getElementById('sheet-status');
+  if (!el) return;
+  el.style.display = 'block';
+  el.style.background = type === 'success' ? 'rgba(74,222,128,.1)' :
+                         type === 'error'   ? 'rgba(248,113,113,.1)' :
+                                              'rgba(124,111,247,.1)';
+  el.style.color = type === 'success' ? 'var(--green)' :
+                   type === 'error'   ? 'var(--red)' :
+                                        'var(--accent)';
+  el.style.border = '1px solid ' + (type === 'success' ? 'rgba(74,222,128,.3)' :
+                                     type === 'error'   ? 'rgba(248,113,113,.3)' :
+                                                          'rgba(124,111,247,.3)');
+  el.textContent = msg;
+}
+
+function saveSheetUrl() {
+  const url = (document.getElementById('sheet-url').value || '').trim();
+  if (!url) { toast('Masukkan URL Apps Script dulu!', 'error'); return; }
+  state.sheetUrl = url;
+  saveState();
+
+  const pullBtn = document.getElementById('pull-btn');
+  const syncBtn = document.getElementById('sync-btn');
+  if (pullBtn) pullBtn.style.display = 'flex';
+  if (syncBtn) syncBtn.style.display = 'flex';
+
+  setSheetStatus('⟳ Menguji koneksi...', 'info');
+
+  // Test dengan GET
+  fetch(url + '?action=ping')
+    .then(r => r.json())
+    .then(data => {
+      if (data.status === 'ok') {
+        setSheetStatus('✓ Terhubung! Menarik data dari Sheets...', 'success');
+        updateSyncStatusUI();
+        toast('Terhubung! Menarik data...');
+        setTimeout(() => pullFromSheets(), 500);
+      } else {
+        setSheetStatus('✓ URL disimpan. CORS normal — sync tetap bekerja.', 'success');
+        updateSyncStatusUI();
+        toast('URL disimpan!');
+      }
+    })
+    .catch(() => {
+      // CORS error — normal, URL masih valid
+      setSheetStatus('✓ URL disimpan. Gunakan "Tarik Data" untuk sync pertama kali.', 'success');
+      updateSyncStatusUI();
+      toast('URL disimpan!');
+    });
+}
+
+// PUSH: kirim semua data HP → Sheets
+async function pushAllToSheets() {
+  if (!state.sheetUrl) { toast('Hubungkan ke Sheets dulu!', 'error'); return; }
+  setSheetStatus('⬆ Mengirim semua data ke Sheets...', 'info');
+  toast('Mengirim data ke Sheets...');
+  try {
+    const res = await fetch(state.sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'push_all',
+        transactions: state.transactions,
+        accounts: state.accounts
+      })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      state.lastSync = Date.now();
+      saveState();
+      updateSyncStatusUI();
+      setSheetStatus('✓ Semua data berhasil dikirim ke Google Sheets!', 'success');
+      toast('Data berhasil dikirim ke Sheets! ✓');
+    } else {
+      throw new Error(data.msg || 'Unknown error');
+    }
+  } catch(e) {
+    setSheetStatus('⚠ Gagal push: ' + e.message, 'error');
+    toast('Gagal kirim data: ' + e.message, 'error');
+  }
+}
+
+// PULL: ambil semua data Sheets → HP
+async function pullFromSheets() {
+  if (!state.sheetUrl) { toast('Hubungkan ke Sheets dulu!', 'error'); return; }
+  setSheetStatus('⬇ Menarik data dari Google Sheets...', 'info');
+  toast('Menarik data dari Sheets...');
+  try {
+    const res = await fetch(state.sheetUrl + '?action=get_all&t=' + Date.now());
+    const data = await res.json();
+
+    if (data.status === 'ok') {
+      if (data.transactions && data.transactions.length > 0) {
+        // Normalize: amount harus number
+        state.transactions = data.transactions.map(t => ({
+          ...t,
+          amount: parseFloat(t.amount) || 0
+        }));
+      }
+      if (data.accounts && data.accounts.length > 0) {
+        state.accounts = data.accounts.map(a => ({
+          ...a,
+          balance: parseFloat(a.balance) || 0
+        }));
+      }
+      state.lastSync = Date.now();
+      saveState();
+      updateSyncStatusUI();
+      setSheetStatus('✓ Data berhasil ditarik dari Google Sheets! (' +
+        state.transactions.length + ' transaksi, ' +
+        state.accounts.length + ' akun)', 'success');
+      toast('Data berhasil ditarik dari Sheets! ✓');
+      renderDashboard();
+    } else {
+      throw new Error(data.msg || 'Sheets kosong atau belum ada data');
+    }
+  } catch(e) {
+    setSheetStatus('⚠ Gagal tarik data. Pastikan script sudah di-deploy ulang dengan kode terbaru. Error: ' + e.message, 'error');
+    toast('Gagal tarik data dari Sheets', 'error');
+  }
+}
+
+// SYNC per transaksi baru (push 1 transaksi + update akun)
 async function syncToSheets(tx) {
   if (!state.sheetUrl) return;
   try {
     await fetch(state.sheetUrl, {
       method: 'POST',
       body: JSON.stringify({
-        type: 'transaction',
-        date: tx.date, desc: tx.desc, category: tx.category,
-        account: tx.accountName, txType: tx.type,
-        amount: Math.abs(tx.amount), note: tx.note || ''
+        action: 'add_transaction',
+        tx: tx,
+        accounts: state.accounts
       })
     });
+    state.lastSync = Date.now();
+    saveState();
+    updateSyncStatusUI();
+  } catch(e) {
+    console.log('Sync error (akan dicoba lagi):', e.message);
+  }
+}
+
+// Sync akun saja (untuk edit saldo, tambah/hapus akun)
+async function syncAccountsToSheets() {
+  if (!state.sheetUrl) return;
+  try {
+    await fetch(state.sheetUrl, {
+      method: 'POST',
+      body: JSON.stringify({
+        action: 'sync_accounts',
+        accounts: state.accounts
+      })
+    });
+    state.lastSync = Date.now();
+    saveState();
   } catch(e) {}
 }
 
 function copyScript() {
   const txt = document.getElementById('apps-script').textContent;
-  navigator.clipboard.writeText(txt).then(() => toast('Script disalin!'));
+  navigator.clipboard.writeText(txt).then(() => toast('Script disalin! ✓'));
+}
+
+function toggleSetupGuide() {
+  const guide = document.getElementById('setup-guide');
+  const icon = document.getElementById('setup-toggle-icon');
+  if (guide.style.display === 'none') {
+    guide.style.display = 'flex';
+    guide.style.flexDirection = 'column';
+    guide.style.gap = '12px';
+    if (icon) icon.textContent = '▲ Sembunyikan';
+  } else {
+    guide.style.display = 'none';
+    if (icon) icon.textContent = '▼ Tampilkan';
+  }
 }
 
 // ═══════════════════════════════════════════════════
@@ -2597,12 +2911,25 @@ function exportAllXLSX() {
   renderDashboard();
   document.getElementById('tf-date').value = today();
 
+  // Auto pull dari Sheets saat buka app jika URL sudah disetting
+  if (state.sheetUrl) {
+    const timeSinceSync = state.lastSync ? (Date.now() - state.lastSync) : Infinity;
+    const fiveMinutes = 5 * 60 * 1000;
+    // Auto pull jika belum sync dalam 5 menit terakhir
+    if (timeSinceSync > fiveMinutes) {
+      setTimeout(() => {
+        console.log('[WalletUS] Auto-pulling from Sheets...');
+        pullFromSheets().catch(() => {});
+      }, 1200);
+    }
+  }
+
   // Register PWA service worker
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', function() {
       navigator.serviceWorker.register('./sw.js')
-        .then(function(r) { console.log('SW ready:', r.scope); })
-        .catch(function(e) { console.log('SW fail:', e); });
+        .then(r => console.log('SW ready:', r.scope))
+        .catch(e => console.log('SW fail:', e));
     });
   }
 })();
