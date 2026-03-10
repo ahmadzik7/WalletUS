@@ -1355,6 +1355,7 @@
         <input type="text" id="sheet-url" class="form-input" placeholder="https://script.google.com/macros/s/...">
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-primary" style="flex:1" onclick="saveSheetUrl()">Simpan & Hubungkan</button>
+          <button class="btn btn-ghost" style="flex-shrink:0;white-space:nowrap" onclick="testConnection()">🔍 Test</button>
           <button class="btn btn-ghost" onclick="pullFromSheets()" id="pull-btn" style="display:none;flex:1">⬇ Tarik Data dari Sheets</button>
         </div>
       </div>
@@ -1415,108 +1416,161 @@
             <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
               <button class="copy-btn" onclick="copyScript()">📋 Copy Script</button>
             </div>
-            <pre class="code-block" id="apps-script">// WalletUS Apps Script v5 — GET-based (fixes redirect body loss)
-// PENTING: Semua request pakai GET + parameter ?d=... agar tidak kena redirect issue
+            <pre class="code-block" id="apps-script">// ═══════════════════════════════════════════════════════
+// WalletUS Apps Script v6
+// Paste ini ke Google Apps Script, lalu Deploy ulang (New Version)
+// ═══════════════════════════════════════════════════════
+
+function doPost(e) {
+  try {
+    var ss  = SpreadsheetApp.getActiveSpreadsheet();
+    // Baca body — works dengan Content-Type: text/plain
+    var raw  = (e.postData && e.postData.contents) ? e.postData.contents : '{}';
+    var data = JSON.parse(raw);
+    var out  = route(ss, data);
+    return out;
+  } catch(err) {
+    return err_(err);
+  }
+}
 
 function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var raw = e.parameter.d;
-    // Jika tidak ada parameter → health check
-    if (!raw) return json_({status:'ok', msg:'WalletUS v5 aktif ✓'});
-    var data = JSON.parse(decodeURIComponent(raw));
-    if (data.action === 'get_all')            return getData(ss);
-    if (data.action === 'push_all')           return pushAll(ss, data);
-    if (data.action === 'add_transaction')    return addTx(ss, data);
-    if (data.action === 'update_transaction') return updateTx(ss, data);
-    if (data.action === 'sync_accounts')      { writeAccounts(ss, data.accounts); return ok('accounts synced'); }
-    if (data.action === 'sync_shopping')      { writeShopping(ss, data.shoppingLists); return ok('shopping synced'); }
-    if (data.action === 'delete_transaction') return deleteTxAction(ss, data);
-    return ok('no action matched');
-  } catch(err) { return err_(err); }
+    // Support ?d=JSON untuk fallback GET
+    var raw  = (e.parameter && e.parameter.d) ? decodeURIComponent(e.parameter.d) : '{}';
+    var data = JSON.parse(raw);
+    if (!data.action) return json_({status:'ok', msg:'WalletUS v6 aktif ✓'});
+    return route(ss, data);
+  } catch(err) {
+    return err_(err);
+  }
 }
 
-// doPost tetap ada sebagai fallback
-function doPost(e) {
-  try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var data = JSON.parse(e.postData.contents);
-    if (data.action === 'get_all')            return getData(ss);
-    if (data.action === 'push_all')           return pushAll(ss, data);
-    if (data.action === 'add_transaction')    return addTx(ss, data);
-    if (data.action === 'sync_accounts')      { writeAccounts(ss, data.accounts); return ok('accounts synced'); }
-    if (data.action === 'sync_shopping')      { writeShopping(ss, data.shoppingLists); return ok('shopping synced'); }
-    if (data.action === 'delete_transaction') return deleteTxAction(ss, data);
-    return ok('no action matched');
-  } catch(err) { return err_(err); }
+function route(ss, data) {
+  if (data.action === 'get_all')            return getData(ss);
+  if (data.action === 'push_all')           return pushAll(ss, data);
+  if (data.action === 'add_transaction')    return addTx(ss, data);
+  if (data.action === 'update_transaction') return updateTx(ss, data);
+  if (data.action === 'delete_transaction') return deleteTxAction(ss, data);
+  if (data.action === 'sync_accounts')      { writeAccounts(ss, data.accounts); return ok('accounts synced'); }
+  if (data.action === 'sync_shopping')      { writeShopping(ss, data.shoppingLists); return ok('shopping synced'); }
+  return ok('no action: ' + (data.action || 'undefined'));
 }
 
 function getData(ss) {
-  return json_({status:'ok',
-    transactions:  readSheet(ss,'Transactions'),
-    accounts:      readSheet(ss,'Accounts'),
+  return json_({
+    status: 'ok',
+    transactions:  readSheet(ss, 'Transactions'),
+    accounts:      readSheet(ss, 'Accounts'),
     shoppingLists: readShoppingSheet(ss)
   });
 }
+
 function pushAll(ss, data) {
-  writeTransactions(ss, data.transactions || []);
-  writeAccounts(ss, data.accounts || []);
-  writeShopping(ss, data.shoppingLists || []);
+  writeTransactions(ss, data.transactions  || []);
+  writeAccounts(ss,    data.accounts       || []);
+  writeShopping(ss,    data.shoppingLists  || []);
   return ok('push_all done');
 }
+
 function addTx(ss, data) {
-  var s = getOrCreate(ss,'Transactions');
-  if (s.getLastRow()===0) s.appendRow(['id','date','desc','category','accountId','accountName','type','amount','note','toAccountId','toAccountName']);
-  var t=data.tx;
-  s.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',t.accountName||'',t.type||'',t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);
+  var s = getOrCreate(ss, 'Transactions');
+  if (s.getLastRow() === 0) {
+    s.appendRow(['id','date','desc','category','accountId','accountName','type','amount','note','toAccountId','toAccountName']);
+  }
+  var t = data.tx || {};
+  s.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'', t.accountId||'',
+    t.accountName||'', t.type||'', t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
   if (data.accounts) writeAccounts(ss, data.accounts);
   return ok('tx added');
 }
+
 function updateTx(ss, data) {
-  var s=getOrCreate(ss,'Transactions'), rows=s.getDataRange().getValues(), t=data.tx;
-  for (var i=1;i<rows.length;i++) {
-    if (String(rows[i][0])===String(t.id)) {
-      s.getRange(i+1,1,1,11).setValues([[t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',t.accountName||'',t.type||'',t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']]);
+  var s    = getOrCreate(ss, 'Transactions');
+  var rows = s.getDataRange().getValues();
+  var t    = data.tx || {};
+  for (var i = 1; i < rows.length; i++) {
+    if (String(rows[i][0]) === String(t.id)) {
+      s.getRange(i+1, 1, 1, 11).setValues([[
+        t.id||'', t.date||'', t.desc||'', t.category||'', t.accountId||'',
+        t.accountName||'', t.type||'', t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||''
+      ]]);
       break;
     }
   }
   if (data.accounts) writeAccounts(ss, data.accounts);
   return ok('tx updated');
 }
+
 function deleteTxAction(ss, data) {
-  var s=getOrCreate(ss,'Transactions'), rows=s.getDataRange().getValues();
-  for (var i=rows.length-1;i>=1;i--) { if (String(rows[i][0])===String(data.id)){s.deleteRow(i+1);break;} }
+  var s    = getOrCreate(ss, 'Transactions');
+  var rows = s.getDataRange().getValues();
+  for (var i = rows.length - 1; i >= 1; i--) {
+    if (String(rows[i][0]) === String(data.id)) { s.deleteRow(i + 1); break; }
+  }
   if (data.accounts) writeAccounts(ss, data.accounts);
   return ok('tx deleted');
 }
-function writeTransactions(ss,txs) {
-  var s=getOrCreate(ss,'Transactions'); s.clearContents();
+
+function writeTransactions(ss, txs) {
+  var s = getOrCreate(ss, 'Transactions');
+  s.clearContents();
   s.appendRow(['id','date','desc','category','accountId','accountName','type','amount','note','toAccountId','toAccountName']);
-  (txs||[]).forEach(function(t){s.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',t.accountName||'',t.type||'',t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);});
+  (txs || []).forEach(function(t) {
+    s.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'', t.accountId||'',
+      t.accountName||'', t.type||'', t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
+  });
 }
-function writeAccounts(ss,accs) {
-  var s=getOrCreate(ss,'Accounts'); s.clearContents();
+
+function writeAccounts(ss, accs) {
+  var s = getOrCreate(ss, 'Accounts');
+  s.clearContents();
   s.appendRow(['id','name','balance','type','color']);
-  (accs||[]).forEach(function(a){s.appendRow([a.id||'',a.name||'',a.balance||0,a.type||'',a.color||'']);});
+  (accs || []).forEach(function(a) {
+    s.appendRow([a.id||'', a.name||'', a.balance||0, a.type||'', a.color||'']);
+  });
 }
-function writeShopping(ss,lists) {
-  var s=getOrCreate(ss,'ShoppingLists'); s.clearContents();
-  s.getRange(1,1).setValue(JSON.stringify(lists||[]));
+
+function writeShopping(ss, lists) {
+  var s = getOrCreate(ss, 'ShoppingLists');
+  s.clearContents();
+  s.getRange(1, 1).setValue(JSON.stringify(lists || []));
 }
-function readSheet(ss,name) {
-  var s=getOrCreate(ss,name); if(s.getLastRow()<=1) return [];
-  var d=s.getDataRange().getValues(),h=d[0],out=[];
-  for(var i=1;i<d.length;i++){var o={};h.forEach(function(k,idx){o[k]=d[i][idx];});if(o.id)out.push(o);}
+
+function readSheet(ss, name) {
+  var s = getOrCreate(ss, name);
+  if (s.getLastRow() <= 1) return [];
+  var d   = s.getDataRange().getValues();
+  var h   = d[0];
+  var out = [];
+  for (var i = 1; i < d.length; i++) {
+    var o = {};
+    h.forEach(function(k, idx) { o[k] = d[i][idx]; });
+    if (o.id) out.push(o);
+  }
   return out;
 }
+
 function readShoppingSheet(ss) {
-  var s=getOrCreate(ss,'ShoppingLists'); if(s.getLastRow()===0) return [];
-  try{var r=s.getRange(1,1).getValue(); return r?JSON.parse(r):[];}catch(e){return [];}
+  var s = getOrCreate(ss, 'ShoppingLists');
+  if (s.getLastRow() === 0) return [];
+  try {
+    var r = s.getRange(1, 1).getValue();
+    return r ? JSON.parse(r) : [];
+  } catch(e) { return []; }
 }
-function getOrCreate(ss,name){return ss.getSheetByName(name)||ss.insertSheet(name);}
-function ok(msg){return json_({status:'ok',msg:msg});}
-function err_(e){return json_({status:'error',msg:String(e)});}
-function json_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}</pre>
+
+function getOrCreate(ss, name) {
+  return ss.getSheetByName(name) || ss.insertSheet(name);
+}
+function ok(msg)  { return json_({status:'ok',    msg: msg}); }
+function err_(e)  { return json_({status:'error', msg: String(e)}); }
+function json_(o) {
+  return ContentService
+    .createTextOutput(JSON.stringify(o))
+    .setMimeType(ContentService.MimeType.JSON);
+}</pre>
           </div>
 
           <div class="card card-sm" style="border-color:rgba(251,146,60,.3)">
@@ -2880,52 +2934,94 @@ function setSheetStatus(msg, type) {
 function saveSheetUrl() {
   const url = (document.getElementById('sheet-url').value || '').trim();
   if (!url) { toast('Masukkan URL Apps Script dulu!', 'error'); return; }
+  if (!url.includes('script.google.com')) {
+    toast('URL tidak valid — harus dari script.google.com', 'error'); return;
+  }
   state.sheetUrl = url;
   saveState();
-
   const pullBtn = document.getElementById('pull-btn');
   const syncBtn = document.getElementById('sync-btn');
   if (pullBtn) pullBtn.style.display = 'flex';
   if (syncBtn) syncBtn.style.display = 'flex';
+  updateSyncStatusUI();
+  toast('URL disimpan! ✓ Menguji koneksi...');
+  testConnection();
+}
 
-  setSheetStatus('⟳ Menguji koneksi...', 'info');
+async function testConnection() {
+  if (!state.sheetUrl) { toast('URL belum disimpan', 'error'); return; }
+  setSheetStatus('⟳ Menguji koneksi ke Apps Script...', 'info');
+  try {
+    // Health check via GET (tidak butuh body)
+    const res  = await fetch(state.sheetUrl, { method: 'GET' });
+    const text = (await res.text()).trim();
+    console.log('[WalletUS] test response:', text.slice(0, 150));
 
-  // Test dengan GET
-  fetch(url + '?action=ping')
-    .then(r => r.json())
-    .then(data => {
-      if (data.status === 'ok') {
-        setSheetStatus('✓ Terhubung! Menarik data dari Sheets...', 'success');
-        updateSyncStatusUI();
-        toast('Terhubung! Menarik data...');
-        setTimeout(() => pullFromSheets(), 500);
-      } else {
-        setSheetStatus('✓ URL disimpan. CORS normal — sync tetap bekerja.', 'success');
-        updateSyncStatusUI();
-        toast('URL disimpan!');
-      }
-    })
-    .catch(() => {
-      // CORS error — normal, URL masih valid
-      setSheetStatus('✓ URL disimpan. Gunakan "Tarik Data" untuk sync pertama kali.', 'success');
-      updateSyncStatusUI();
-      toast('URL disimpan!');
-    });
+    if (text.includes('"status"') && text.includes('ok')) {
+      setSheetStatus('✓ Koneksi berhasil! Apps Script v6 aktif. Klik "Tarik Data" untuk mulai sync.', 'success');
+      toast('Koneksi OK ✓');
+    } else if (text.startsWith('{')) {
+      setSheetStatus('✓ Terhubung (respons tidak standar). Coba Tarik Data.', 'success');
+    } else if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+      setSheetStatus('⚠ Apps Script mengembalikan HTML — script belum di-deploy atau perlu deploy ulang.\n\nCara fix:\n1. Extensions → Apps Script\n2. Paste kode v6 (hapus semua kode lama)\n3. Deploy → Manage Deployments → Edit → New Version → Deploy\n4. Pastikan Access: Anyone', 'error');
+    } else {
+      setSheetStatus('⚠ Respons tidak dikenali. Coba Tarik Data untuk test lengkap.', 'error');
+    }
+  } catch(e) {
+    // CORS error saat GET = normal untuk beberapa deployment
+    setSheetStatus('⟳ CORS block saat test (ini normal). Coba langsung "Tarik Data" di bawah.', 'info');
+    toast('URL disimpan. Coba Tarik Data.');
+  }
 }
 
 // PUSH: kirim semua data HP → Sheets
-// ─── Helper utama: kirim ke Apps Script via GET + ?d= ───────────────
-// Alasan: POST body hilang saat Google redirect 302 /exec → /exec?...
-// GET tidak kehilangan parameter saat redirect → selalu works
+// ─── Helper utama: kirim ke Apps Script ─────────────────────────────
+// POST text/plain = tidak trigger CORS preflight, body tidak hilang
 async function fetchSheets(payload) {
-  const encoded = encodeURIComponent(JSON.stringify(payload));
-  const url = state.sheetUrl + (state.sheetUrl.includes('?') ? '&' : '?') + 'd=' + encoded;
-  const res  = await fetch(url, { method: 'GET' });
-  const text = await res.text();
-  // Ambil JSON terdalam jika ada wrapper HTML
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) throw new Error('Respons bukan JSON. Cek Apps Script di Google Sheets.');
-  return JSON.parse(m[0]);
+  const body = JSON.stringify(payload);
+
+  // Strategi 1: POST text/plain (tidak ada URL length limit, tidak preflight)
+  let text = '';
+  try {
+    const res = await fetch(state.sheetUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: body
+    });
+    text = await res.text();
+    console.log('[WalletUS] response preview:', text.slice(0, 120));
+  } catch(fetchErr) {
+    throw new Error('Gagal koneksi: ' + fetchErr.message);
+  }
+
+  // Parse JSON jika langsung valid
+  const trimmed = text.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    return JSON.parse(trimmed);
+  }
+
+  // Coba ekstrak JSON dari dalam HTML error page
+  const m = trimmed.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch(e) {} }
+
+  // Strategi 2: GET fallback (hanya untuk payload kecil, misal get_all tanpa data besar)
+  const encoded = encodeURIComponent(body);
+  if (encoded.length < 7000) {
+    console.warn('[WalletUS] POST tidak valid, coba GET...');
+    const urlGet = state.sheetUrl + (state.sheetUrl.includes('?') ? '&' : '?') + 'd=' + encoded;
+    const res2   = await fetch(urlGet);
+    const text2  = (await res2.text()).trim();
+    if (text2.startsWith('{')) return JSON.parse(text2);
+    const m2 = text2.match(/\{[\s\S]*\}/);
+    if (m2) { try { return JSON.parse(m2[0]); } catch(e) {} }
+  }
+
+  // Jika semua gagal, lempar error dengan petunjuk jelas
+  const preview = text.slice(0, 200);
+  if (preview.includes('<!DOCTYPE') || preview.includes('<html')) {
+    throw new Error('Apps Script mengembalikan halaman HTML (bukan JSON).\n\nSolusi:\n1. Buka Google Sheet → Extensions → Apps Script\n2. Paste kode v5 (hapus kode lama dulu)\n3. Deploy → Manage Deployments → Edit → New Version → Deploy\n4. Pastikan "Who has access" = Anyone');
+  }
+  throw new Error('Respons tidak valid: ' + preview);
 }
 
 async function pushAllToSheets() {
