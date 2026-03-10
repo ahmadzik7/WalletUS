@@ -1254,14 +1254,19 @@
     <div class="page-header">
       <div>
         <div class="page-title">Summary</div>
-        <div class="page-subtitle">Ringkasan mingguan & bulanan</div>
+        <div class="page-subtitle" id="summary-subtitle">Analisis keuangan kamu</div>
       </div>
     </div>
 
-    <div style="display:flex;gap:8px;margin-bottom:24px">
-      <div class="pill active" onclick="setSummaryPeriod('weekly',this)">Mingguan</div>
-      <div class="pill" onclick="setSummaryPeriod('monthly',this)">Bulanan</div>
+    <!-- Period selector -->
+    <div style="display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap">
+      <div class="pill active" onclick="setSummaryPeriod('monthly',this)">Bulanan</div>
+      <div class="pill" onclick="setSummaryPeriod('weekly',this)">Mingguan</div>
+      <div class="pill" onclick="setSummaryPeriod('yearly',this)">Tahunan</div>
     </div>
+
+    <!-- KPI row -->
+    <div id="summary-kpi" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px"></div>
 
     <div id="summary-content"></div>
   </div>
@@ -1540,13 +1545,14 @@ function json_(o){return ContentService.createTextOutput(JSON.stringify(o)).setM
 <div id="modal-transaction" class="modal-overlay">
   <div class="modal">
     <div style="width:40px;height:4px;background:var(--border);border-radius:99px;margin:0 auto 20px"></div>
-    <div class="modal-title">Catat Transaksi</div>
+    <div class="modal-title" id="tx-modal-title">Catat Transaksi</div>
     <div class="type-toggle">
       <div class="type-btn active-income" onclick="setTxType('income',this)" id="type-income">📈 Pemasukan</div>
       <div class="type-btn" onclick="setTxType('expense',this)" id="type-expense">📉 Pengeluaran</div>
       <div class="type-btn" onclick="setTxType('transfer',this)" id="type-transfer">⇄ Transfer</div>
     </div>
     <input type="hidden" id="tx-type" value="income">
+    <input type="hidden" id="tx-edit-id" value="">
     <div class="form-row">
       <div class="form-group">
         <label class="form-label">Tanggal</label>
@@ -1864,18 +1870,62 @@ function toast(msg, type='success') {
 function openModal(type) {
   const el = document.getElementById('modal-' + type);
   el.classList.add('open');
-
   if (type === 'transaction') {
+    // Reset ke mode tambah baru (bukan edit)
+    document.getElementById('tx-edit-id').value = '';
+    document.getElementById('tx-modal-title').textContent = 'Catat Transaksi';
+    document.getElementById('tx-submit-btn').textContent = 'Simpan';
     document.getElementById('tx-date').value = today();
+    document.getElementById('tx-amount').value = '';
+    document.getElementById('tx-desc').value = '';
+    document.getElementById('tx-note').value = '';
     populateAccountSelect('tx-account');
     populateAccountSelect('tx-to-account');
     setTxType('income', document.getElementById('type-income'));
   }
-  if (type === 'account') {
-    buildColorPicker();
+  if (type === 'account') { buildColorPicker(); }
+  if (type === 'shopping') { populateShoppingListSelect(); }
+}
+
+function editTx(id) {
+  const tx = state.transactions.find(t => t.id === id);
+  if (!tx) return;
+
+  const el = document.getElementById('modal-transaction');
+  el.classList.add('open');
+
+  document.getElementById('tx-edit-id').value = id;
+  document.getElementById('tx-modal-title').textContent = 'Edit Transaksi';
+  document.getElementById('tx-submit-btn').textContent = 'Update Transaksi';
+
+  populateAccountSelect('tx-account');
+  populateAccountSelect('tx-to-account');
+
+  document.getElementById('tx-date').value = tx.date;
+  document.getElementById('tx-amount').value = Math.abs(tx.amount);
+  document.getElementById('tx-desc').value = tx.desc;
+  document.getElementById('tx-note').value = tx.note || '';
+  document.getElementById('tx-account').value = tx.accountId;
+
+  // Set kategori
+  const catSel = document.getElementById('tx-category');
+  if (catSel) {
+    // Coba set nilai; kalau tidak ada tambahkan option sementara
+    let found = false;
+    for (let i = 0; i < catSel.options.length; i++) {
+      if (catSel.options[i].value === tx.category) { catSel.selectedIndex = i; found = true; break; }
+    }
+    if (!found && tx.category) {
+      const opt = document.createElement('option');
+      opt.value = tx.category; opt.textContent = tx.category;
+      catSel.appendChild(opt);
+      catSel.value = tx.category;
+    }
   }
-  if (type === 'shopping') {
-    populateShoppingListSelect();
+
+  setTxType(tx.type, document.getElementById('type-' + tx.type));
+  if (tx.type === 'transfer' && tx.toAccountId) {
+    document.getElementById('tx-to-account').value = tx.toAccountId;
   }
 }
 
@@ -1911,12 +1961,13 @@ function setTxType(type, el) {
 }
 
 function saveTx() {
+  const editId = document.getElementById('tx-edit-id').value;
   const date = document.getElementById('tx-date').value;
   const amount = parseFloat(document.getElementById('tx-amount').value);
-  const desc = document.getElementById('tx-desc').value;
+  const desc = document.getElementById('tx-desc').value.trim();
   const accountId = document.getElementById('tx-account').value;
   const category = document.getElementById('tx-category').value;
-  const note = document.getElementById('tx-note').value;
+  const note = document.getElementById('tx-note').value.trim();
   const type = currentTxType;
 
   if (!date || !amount || !desc || !accountId) {
@@ -1926,6 +1977,57 @@ function saveTx() {
   const account = state.accounts.find(a => a.id === accountId);
   if (!account) return;
 
+  // ── MODE EDIT ──
+  if (editId) {
+    const oldTx = state.transactions.find(t => t.id === editId);
+    if (!oldTx) return;
+
+    // Balikkan efek transaksi lama ke saldo
+    const oldAcc = state.accounts.find(a => a.id === oldTx.accountId);
+    if (oldAcc) {
+      if (oldTx.type === 'income') oldAcc.balance -= oldTx.amount;
+      else if (oldTx.type === 'expense') oldAcc.balance += Math.abs(oldTx.amount);
+      else if (oldTx.type === 'transfer') {
+        oldAcc.balance += Math.abs(oldTx.amount);
+        const oldTo = state.accounts.find(a => a.id === oldTx.toAccountId);
+        if (oldTo) oldTo.balance -= Math.abs(oldTx.amount);
+      }
+    }
+
+    // Buat objek transaksi baru dengan id yang sama
+    const newTx = { id: editId, date, desc, accountId, accountName: account.name, category, note, type };
+
+    if (type === 'income') {
+      newTx.amount = amount;
+      account.balance += amount;
+    } else if (type === 'expense') {
+      newTx.amount = -amount;
+      account.balance -= amount;
+    } else if (type === 'transfer') {
+      const toId = document.getElementById('tx-to-account').value;
+      const toAcc = state.accounts.find(a => a.id === toId);
+      if (!toAcc) { toast('Akun tujuan tidak ditemukan!', 'error'); return; }
+      newTx.amount = -amount;
+      newTx.toAccountId = toId;
+      newTx.toAccountName = toAcc.name;
+      account.balance -= amount;
+      toAcc.balance += amount;
+    }
+
+    // Replace transaksi lama
+    const idx = state.transactions.findIndex(t => t.id === editId);
+    if (idx !== -1) state.transactions[idx] = newTx;
+
+    saveState();
+    syncToSheets(newTx);
+    closeModal('transaction');
+    renderDashboard();
+    if (document.getElementById('page-transactions').classList.contains('active')) renderTransactions();
+    toast('Transaksi berhasil diupdate! ✓');
+    return;
+  }
+
+  // ── MODE TAMBAH BARU ──
   const tx = { id: genId(), date, amount, desc, accountId, accountName: account.name, category, note, type };
 
   if (type === 'income') {
@@ -2075,91 +2177,59 @@ function renderDashboard() {
   tbody.innerHTML = state.transactions.slice(0,8).map(t => txRow(t, false)).join('');
 }
 
-var chartPeriod = '7d';
+var chartPeriod = '30d';
 
 function setChartPeriod(p, el) {
   chartPeriod = p;
-  document.querySelectorAll('#chart-btn-7d, #chart-btn-30d').forEach(function(b) { b.classList.remove('active'); });
+  document.querySelectorAll('#chart-btn-7d, #chart-btn-30d').forEach(b => b.classList.remove('active'));
   if (el) el.classList.add('active');
   renderChart();
 }
 
 function renderChart() {
-  if (chartPeriod === '7d') render7DayChart();
-  else renderMonthlyChart();
+  renderSmartChart(chartPeriod === '7d' ? 7 : 30);
 }
 
-function render7DayChart() {
+function renderSmartChart(days) {
   const wrap = document.getElementById('chart-7days');
-  const days = [];
-  for (let i = 6; i >= 0; i--) {
+  const pts = [];
+  for (let i = days-1; i >= 0; i--) {
     const d = new Date(); d.setDate(d.getDate() - i);
-    days.push(d.toISOString().slice(0,10));
+    const ds = d.toISOString().slice(0,10);
+    const dow = d.getDay();
+    const inc = state.transactions.filter(t=>t.date===ds&&t.type==='income').reduce((s,t)=>s+t.amount,0);
+    const exp = state.transactions.filter(t=>t.date===ds&&t.type==='expense').reduce((s,t)=>s+Math.abs(t.amount),0);
+    const lbl = days===7
+      ? ['Min','Sen','Sel','Rab','Kam','Jum','Sab'][dow]
+      : (parseInt(ds.slice(8,10))%5===0||parseInt(ds.slice(8,10))===1 ? ds.slice(8,10) : '');
+    pts.push({ ds, inc, exp, lbl });
   }
+  const maxVal = Math.max(...pts.map(p=>Math.max(p.inc,p.exp)), 1);
+  const totalInc = pts.reduce((s,p)=>s+p.inc,0);
+  const totalExp = pts.reduce((s,p)=>s+p.exp,0);
+  const activeDays = pts.filter(p=>p.exp>0).length || 1;
+  const avgDaily = totalExp / activeDays;
 
-  const maxIncome = Math.max(...days.map(d =>
-    state.transactions.filter(t => t.date === d && t.type === 'income').reduce((s,t) => s+t.amount,0)
-  ), 1);
-  const maxExpense = Math.max(...days.map(d =>
-    state.transactions.filter(t => t.date === d && t.type === 'expense').reduce((s,t) => s+Math.abs(t.amount),0)
-  ), 1);
-  const maxVal = Math.max(maxIncome, maxExpense);
-
-  wrap.innerHTML = days.map(d => {
-    const inc = state.transactions.filter(t => t.date===d && t.type==='income').reduce((s,t)=>s+t.amount,0);
-    const exp = state.transactions.filter(t => t.date===d && t.type==='expense').reduce((s,t)=>s+Math.abs(t.amount),0);
-    const iH = maxVal ? (inc / maxVal * 160) : 0;
-    const eH = maxVal ? (exp / maxVal * 160) : 0;
-    const label = d.slice(8,10) + '/' + d.slice(5,7);
-    return `
-      <div class="chart-bar-wrap">
-        <div style="display:flex;gap:2px;align-items:flex-end;height:160px">
-          <div class="chart-bar income-bar" style="width:12px;height:${Math.max(iH,4)}px" title="+${fmt(inc)}"></div>
-          <div class="chart-bar expense-bar" style="width:12px;height:${Math.max(eH,4)}px" title="-${fmt(exp)}"></div>
-        </div>
-        <div class="chart-label">${label}</div>
-      </div>
-    `;
-  }).join('');
-}
-
-function renderMonthlyChart() {
-  const wrap = document.getElementById('chart-7days');
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const days = [];
-  for (let i = 1; i <= daysInMonth; i++) {
-    const dd = String(i).padStart(2,'0');
-    const mm = String(month + 1).padStart(2,'0');
-    days.push(`${year}-${mm}-${dd}`);
-  }
-
-  const incomes = days.map(d => state.transactions.filter(t => t.date===d && t.type==='income').reduce((s,t)=>s+t.amount,0));
-  const expenses = days.map(d => state.transactions.filter(t => t.date===d && t.type==='expense').reduce((s,t)=>s+Math.abs(t.amount),0));
-  const maxVal = Math.max(...incomes, ...expenses, 1);
-
-  // Group by week for readability if many days
-  const chunkSize = 3; // show every 3 days labeled
-  wrap.innerHTML = days.map((d, idx) => {
-    const inc = incomes[idx];
-    const exp = expenses[idx];
-    const iH = (inc / maxVal * 160);
-    const eH = (exp / maxVal * 160);
-    const dayNum = parseInt(d.slice(8,10));
-    const showLabel = dayNum === 1 || dayNum % 5 === 0;
-    const label = showLabel ? String(dayNum) : '';
-    return `
-      <div class="chart-bar-wrap" style="min-width:0">
-        <div style="display:flex;gap:1px;align-items:flex-end;height:160px">
-          <div class="chart-bar income-bar" style="width:6px;height:${Math.max(iH,2)}px" title="${d}: +${fmt(inc)}"></div>
-          <div class="chart-bar expense-bar" style="width:6px;height:${Math.max(eH,2)}px" title="${d}: -${fmt(exp)}"></div>
-        </div>
-        <div class="chart-label" style="font-size:8px">${label}</div>
-      </div>
-    `;
-  }).join('');
+  wrap.innerHTML = `
+    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text3);margin-bottom:8px;font-family:'Space Mono',monospace;flex-wrap:wrap;gap:4px">
+      <span style="color:var(--green)">↑ Masuk ${fmtShort(totalInc)}</span>
+      <span style="color:var(--red)">↓ Keluar ${fmtShort(totalExp)}</span>
+      <span>Avg/hari aktif ${fmtShort(Math.round(avgDaily))}</span>
+    </div>
+    <div style="display:flex;gap:${days===7?'8':'3'}px;align-items:flex-end;height:120px;margin-bottom:6px">
+      ${pts.map(p=>{
+        const iH=maxVal?Math.max((p.inc/maxVal*112),p.inc>0?3:0):0;
+        const eH=maxVal?Math.max((p.exp/maxVal*112),p.exp>0?3:0):0;
+        return `<div style="flex:1;display:flex;gap:1px;align-items:flex-end;height:112px" title="${p.ds}\nMasuk: ${fmt(p.inc)}\nKeluar: ${fmt(p.exp)}">
+          <div style="flex:1;height:${iH}px;background:linear-gradient(180deg,#4ade80,rgba(74,222,128,.3));border-radius:3px 3px 0 0"></div>
+          <div style="flex:1;height:${eH}px;background:linear-gradient(180deg,#f87171,rgba(248,113,113,.3));border-radius:3px 3px 0 0"></div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div style="display:flex;gap:${days===7?'8':'3'}px">
+      ${pts.map(p=>`<div style="flex:1;text-align:center;font-size:${days===7?'9':'8'}px;color:var(--text3);overflow:hidden;white-space:nowrap">${p.lbl}</div>`).join('')}
+    </div>
+  `;
 }
 
 // ═══════════════════════════════════════════════════
@@ -2175,7 +2245,6 @@ function filterType(t, el) {
 }
 
 function renderTransactions() {
-  // Populate account filter
   const accFilter = document.getElementById('filter-account');
   if (accFilter.children.length === 1) {
     state.accounts.forEach(a => {
@@ -2184,16 +2253,15 @@ function renderTransactions() {
       accFilter.appendChild(o);
     });
   }
-
   const monthVal = document.getElementById('filter-month').value;
-  const accVal = document.getElementById('filter-account').value;
-  const search = document.getElementById('filter-search').value.toLowerCase();
+  const accVal   = document.getElementById('filter-account').value;
+  const search   = document.getElementById('filter-search').value.toLowerCase();
 
   let txs = [...state.transactions];
   if (txTypeFilter !== 'all') txs = txs.filter(t => t.type === txTypeFilter);
   if (monthVal) txs = txs.filter(t => t.date.startsWith(monthVal));
-  if (accVal) txs = txs.filter(t => t.accountId === accVal || t.toAccountId === accVal);
-  if (search) txs = txs.filter(t => t.desc.toLowerCase().includes(search) || t.category.toLowerCase().includes(search));
+  if (accVal)   txs = txs.filter(t => t.accountId === accVal || t.toAccountId === accVal);
+  if (search)   txs = txs.filter(t => (t.desc||'').toLowerCase().includes(search) || (t.category||'').toLowerCase().includes(search));
 
   const tbody = document.getElementById('tx-tbody');
   if (!txs.length) {
@@ -2203,58 +2271,22 @@ function renderTransactions() {
   tbody.innerHTML = txs.map(t => txRow(t, true)).join('');
 }
 
-function txRow(t, withDelete) {
-  const amt = Math.abs(t.amount);
-  const cls = t.type === 'income' ? 'amount-income' : t.type === 'expense' ? 'amount-expense' : 'amount-transfer';
-  const prefix = t.type === 'income' ? '+' : '-';
-  const badge = `<span class="badge badge-${t.type}">${t.type === 'income' ? 'Masuk' : t.type === 'expense' ? 'Keluar' : 'Transfer'}</span>`;
-  const accDisplay = t.type === 'transfer' ? `${t.accountName} → ${t.toAccountName||'?'}` : t.accountName;
-  const del = withDelete ? `<button onclick="deleteTx('${t.id}')" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:13px;padding:2px 6px;border-radius:4px">✕</button>` : '';
-  return `<tr>
-    <td style="font-family:'Space Mono',monospace;font-size:11px;color:var(--text2);white-space:nowrap">${t.date}</td>
-    <td style="font-weight:500;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${t.desc}</td>
-    <td class="col-hide-mobile"><span style="font-size:12px;color:var(--text2)">${t.category}</span></td>
-    <td class="col-hide-mobile" style="font-size:12px;color:var(--text2)">${accDisplay}</td>
-    <td>${badge}</td>
-    <td class="${cls}">${prefix}${fmtShort(amt)}</td>
-    ${withDelete ? `<td>${del}</td>` : ''}
-  </tr>`;
-}
-
-function deleteTx(id) {
-  if (!confirm('Hapus transaksi ini?')) return;
-  const tx = state.transactions.find(t => t.id === id);
-  if (!tx) return;
-
-  // Reverse balance
-  const acc = state.accounts.find(a => a.id === tx.accountId);
-  if (acc) {
-    if (tx.type === 'income') acc.balance -= tx.amount;
-    else if (tx.type === 'expense') acc.balance += Math.abs(tx.amount);
-    else if (tx.type === 'transfer') {
-      acc.balance += Math.abs(tx.amount);
-      const toAcc = state.accounts.find(a => a.id === tx.toAccountId);
-      if (toAcc) toAcc.balance -= Math.abs(tx.amount);
-    }
-  }
-
-  state.transactions = state.transactions.filter(t => t.id !== id);
-  saveState();
-  // Sync hapus ke Sheets
-  if (state.sheetUrl) {
-    fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'delete_transaction', id: id, accounts: state.accounts })
-    }).catch(() => {});
-  }
-  renderTransactions();
-  toast('Transaksi dihapus');
-}
-
 // ═══════════════════════════════════════════════════
-// SUMMARY
+// SUMMARY — PROFESSIONAL FINANCIAL ANALYSIS
 // ═══════════════════════════════════════════════════
-let summaryPeriod = 'weekly';
+let summaryPeriod = 'monthly';
+
+const HARI  = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+const BULAN = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+
+function formatDateID(ds) {
+  const d = new Date(ds + 'T12:00:00');
+  return HARI[d.getDay()] + ', ' + d.getDate() + ' ' + BULAN[d.getMonth()] + ' ' + d.getFullYear();
+}
+function formatMonthID(ym) {
+  const p = ym.split('-');
+  return BULAN[parseInt(p[1])-1] + ' ' + p[0];
+}
 
 function setSummaryPeriod(p, el) {
   summaryPeriod = p;
@@ -2265,114 +2297,235 @@ function setSummaryPeriod(p, el) {
 
 function renderSummary() {
   const wrap = document.getElementById('summary-content');
-  if (summaryPeriod === 'weekly') renderWeeklySummary(wrap);
-  else renderMonthlySummary(wrap);
+  const now  = new Date();
+  if (summaryPeriod === 'monthly')      renderMonthlySummary(wrap, now);
+  else if (summaryPeriod === 'weekly')  renderWeeklySummary(wrap, now);
+  else                                   renderYearlySummary(wrap, now);
 }
 
-function renderWeeklySummary(wrap) {
-  const weeks = {};
-  state.transactions.forEach(t => {
-    const d = new Date(t.date);
-    const weekStart = new Date(d);
-    weekStart.setDate(d.getDate() - d.getDay() + 1);
-    const key = weekStart.toISOString().slice(0,10);
-    if (!weeks[key]) weeks[key] = { income:0, expense:0, txCount:0, cats:{} };
-    if (t.type === 'income') weeks[key].income += t.amount;
-    if (t.type === 'expense') { weeks[key].expense += Math.abs(t.amount); }
-    weeks[key].txCount++;
-    if (t.type !== 'transfer') {
-      weeks[key].cats[t.category] = (weeks[key].cats[t.category]||0) + Math.abs(t.amount);
-    }
-  });
-
-  const sorted = Object.entries(weeks).sort((a,b) => b[0].localeCompare(a[0])).slice(0,8);
-  if (!sorted.length) {
-    wrap.innerHTML = '<p style="color:var(--text3)">Belum ada data transaksi</p>'; return;
-  }
-
-  wrap.innerHTML = sorted.map(([weekStart, w]) => {
-    const net = w.income - w.expense;
-    const topCats = Object.entries(w.cats).sort((a,b)=>b[1]-a[1]).slice(0,3);
-    return `
-      <div class="card" style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
-          <div>
-            <div style="font-family:'Space Mono',monospace;font-size:12px;color:var(--text3)">MINGGU</div>
-            <div style="font-family:'Syne',sans-serif;font-size:18px;font-weight:800">${weekStart}</div>
-            <div style="font-size:12px;color:var(--text2)">${w.txCount} transaksi</div>
-          </div>
-          <div style="text-align:right">
-            <div style="color:var(--green);font-family:'Space Mono',monospace">+${fmt(w.income)}</div>
-            <div style="color:var(--red);font-family:'Space Mono',monospace">-${fmt(w.expense)}</div>
-            <div style="font-weight:700;color:${net>=0?'var(--green)':'var(--red)'};font-family:'Space Mono',monospace">${net>=0?'+':''}${fmt(net)}</div>
-          </div>
-        </div>
-        ${topCats.length ? `
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${topCats.map(([cat,amt]) => `
-              <div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px">
-                <span style="color:var(--text2)">${cat}</span>
-                <span style="font-family:'Space Mono',monospace;color:var(--accent4);margin-left:6px">${fmt(amt)}</span>
-              </div>
-            `).join('')}
-          </div>
-        ` : ''}
-      </div>
-    `;
-  }).join('');
+function renderKPI(cur, prev) {
+  const el = document.getElementById('summary-kpi');
+  if (!el) return;
+  const net = (cur.income||0) - (cur.expense||0);
+  const savRate = (cur.income||0) > 0 ? ((net/(cur.income||1))*100).toFixed(1) : 0;
+  const expChg  = (prev.expense||0) > 0 ? ((((cur.expense||0)-(prev.expense||0))/(prev.expense||1))*100).toFixed(1) : null;
+  el.innerHTML = `
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px">
+      <div style="font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:.8px;margin-bottom:6px">NET CASHFLOW</div>
+      <div style="font-size:18px;font-weight:800;color:${net>=0?'var(--green)':'var(--red)'}">${net>=0?'+':''}${fmtShort(net)}</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">${net>=0?'Surplus ✓':'Defisit ⚠'}</div>
+    </div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px">
+      <div style="font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:.8px;margin-bottom:6px">SAVING RATE</div>
+      <div style="font-size:18px;font-weight:800;color:${savRate>=20?'var(--green)':parseFloat(savRate)>=0?'var(--accent4)':'var(--red)'}">${savRate}%</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">${savRate>=20?'Sangat baik ✓':savRate>=10?'Cukup baik':parseFloat(savRate)>=0?'Perlu ditingkatkan':'Defisit!'}</div>
+    </div>
+    <div style="background:var(--surface2);border:1px solid var(--border);border-radius:14px;padding:14px">
+      <div style="font-size:9px;color:var(--text3);font-family:'Space Mono',monospace;letter-spacing:.8px;margin-bottom:6px">PENGELUARAN</div>
+      <div style="font-size:18px;font-weight:800">${fmtShort(cur.expense||0)}</div>
+      <div style="font-size:11px;margin-top:4px;color:${expChg===null?'var(--text3)':parseFloat(expChg)<=0?'var(--green)':'var(--red)'}">${expChg===null?'—':parseFloat(expChg)<=0?'↓'+Math.abs(expChg)+'% vs lalu':'↑'+expChg+'% vs lalu'}</div>
+    </div>`;
 }
 
-function renderMonthlySummary(wrap) {
+function renderMonthlySummary(wrap, now) {
+  const thisMonth = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const sub = document.getElementById('summary-subtitle');
+  if (sub) sub.textContent = formatMonthID(thisMonth) + ' & historis';
+
   const months = {};
   state.transactions.forEach(t => {
     const key = t.date.slice(0,7);
-    if (!months[key]) months[key] = { income:0, expense:0, cats:{} };
-    if (t.type === 'income') months[key].income += t.amount;
-    if (t.type === 'expense') months[key].expense += Math.abs(t.amount);
-    if (t.type !== 'transfer') months[key].cats[t.category] = (months[key].cats[t.category]||0) + Math.abs(t.amount);
+    if (!months[key]) months[key] = { income:0, expense:0, txCount:0, cats:{}, days:{} };
+    const m = months[key];
+    if (t.type==='income')  { m.income  += t.amount; m.txCount++; }
+    if (t.type==='expense') { m.expense += Math.abs(t.amount); m.txCount++;
+      m.cats[t.category||'Lainnya'] = (m.cats[t.category||'Lainnya']||0)+Math.abs(t.amount);
+      m.days[t.date] = (m.days[t.date]||0)+Math.abs(t.amount);
+    }
   });
 
-  const sorted = Object.entries(months).sort((a,b) => b[0].localeCompare(a[0])).slice(0,12);
-  if (!sorted.length) {
-    wrap.innerHTML = '<p style="color:var(--text3)">Belum ada data transaksi</p>'; return;
-  }
+  const sorted = Object.entries(months).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,12);
+  if (!sorted.length) { wrap.innerHTML='<div class="card" style="text-align:center;padding:32px;color:var(--text3)">Belum ada transaksi</div>'; renderKPI({}); return; }
+
+  const cur  = months[thisMonth]||{income:0,expense:0,txCount:0,cats:{},days:{}};
+  const pd   = new Date(now); pd.setMonth(pd.getMonth()-1);
+  const prev = months[pd.getFullYear()+'-'+String(pd.getMonth()+1).padStart(2,'0')]||{income:0,expense:0};
+  renderKPI(cur, prev);
 
   wrap.innerHTML = sorted.map(([month, m]) => {
-    const net = m.income - m.expense;
-    const savRate = m.income > 0 ? ((net/m.income)*100).toFixed(1) : 0;
-    const cats = Object.entries(m.cats).sort((a,b)=>b[1]-a[1]).slice(0,5);
-    const maxCat = (cats[0] && cats[0][1]) || 1;
+    const net      = m.income - m.expense;
+    const savRate  = m.income>0 ? ((net/m.income)*100).toFixed(1) : 0;
+    const burnRate = m.income>0 ? ((m.expense/m.income)*100).toFixed(1) : (m.expense>0?100:0);
+    const cats     = Object.entries(m.cats).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const maxCat   = cats[0]?.[1]||1;
+    const topDay   = Object.entries(m.days).sort((a,b)=>b[1]-a[1])[0];
+    const isThis   = month===thisMonth;
+    const COLORS   = ['var(--accent)','var(--accent2)','var(--orange)','var(--green)','var(--red)'];
     return `
-      <div class="card" style="margin-bottom:16px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:16px">
-          <div>
-            <div style="font-family:'Syne',sans-serif;font-size:22px;font-weight:800">${month}</div>
-            <div style="font-size:12px;color:var(--text2)">Saving rate: <span style="color:${savRate>0?'var(--green)':'var(--red)'}">${savRate}%</span></div>
+      <div class="card" style="margin-bottom:16px${isThis?';border-color:rgba(124,111,247,.4)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+          <div>${isThis ? `<div style="font-size:9px;font-family:'Space Mono',monospace;color:var(--accent);letter-spacing:1px;margin-bottom:4px">▶ BULAN INI</div>` : ""}
+            <div style="font-family:'Syne',sans-serif;font-size:19px;font-weight:800">${formatMonthID(month)}</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:2px">${m.txCount} transaksi</div>
           </div>
           <div style="text-align:right">
-            <div style="color:var(--green);font-family:'Space Mono',monospace;font-size:15px">+${fmt(m.income)}</div>
-            <div style="color:var(--red);font-family:'Space Mono',monospace;font-size:15px">-${fmt(m.expense)}</div>
-            <div style="font-weight:800;font-family:'Syne',sans-serif;font-size:18px;color:${net>=0?'var(--green)':'var(--red)'}">${fmt(net)}</div>
+            <div style="color:var(--green);font-family:'Space Mono',monospace;font-size:13px">+${fmt(m.income)}</div>
+            <div style="color:var(--red);font-family:'Space Mono',monospace;font-size:13px">-${fmt(m.expense)}</div>
+            <div style="font-weight:800;font-size:17px;color:${net>=0?'var(--green)':'var(--red)'}">${net>=0?'+':''}${fmt(net)}</div>
           </div>
         </div>
-        ${cats.length ? `
-          <div class="section-title" style="font-size:13px;margin-bottom:12px">Top Kategori</div>
-          ${cats.map(([cat,amt]) => `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:14px">
+          <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+            <div style="font-size:9px;color:var(--text3);margin-bottom:4px">Saving Rate</div>
+            <div style="font-weight:700;font-size:14px;color:${savRate>=20?'var(--green)':parseFloat(savRate)>=0?'var(--accent4)':'var(--red)'}">${savRate}%</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+            <div style="font-size:9px;color:var(--text3);margin-bottom:4px">Burn Rate</div>
+            <div style="font-weight:700;font-size:14px;color:${burnRate<70?'var(--green)':burnRate<90?'var(--accent4)':'var(--red)'}">${burnRate}%</div>
+          </div>
+          <div style="background:var(--surface2);border-radius:10px;padding:10px;text-align:center">
+            <div style="font-size:9px;color:var(--text3);margin-bottom:4px">Avg/Hari</div>
+            <div style="font-weight:700;font-size:13px">${fmtShort(Math.round(m.expense/30))}</div>
+          </div>
+        </div>
+        ${topDay?`<div style="font-size:12px;color:var(--text3);margin-bottom:12px;padding:8px 10px;background:rgba(251,146,60,.06);border-radius:8px;border-left:3px solid var(--orange)">⚠ Pengeluaran terbesar: <strong style="color:var(--text)">${formatDateID(topDay[0])}</strong> — ${fmt(topDay[1])}</div>`:''}
+        ${cats.length?`
+          <div style="font-size:10px;font-family:'Space Mono',monospace;color:var(--text3);letter-spacing:.5px;margin-bottom:10px">TOP PENGELUARAN</div>
+          ${cats.map(([cat,amt],i)=>`
             <div style="margin-bottom:10px">
-              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:4px">
-                <span>${cat}</span>
-                <span style="font-family:'Space Mono',monospace;color:var(--text2)">${fmt(amt)}</span>
+              <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;align-items:center">
+                <div style="display:flex;align-items:center;gap:7px">
+                  <div style="width:6px;height:6px;border-radius:50%;background:${COLORS[i]};flex-shrink:0"></div>
+                  <span style="font-weight:500">${cat}</span>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px">
+                  <span style="font-family:'Space Mono',monospace;color:var(--text2);font-size:11px">${fmt(amt)}</span>
+                  <span style="font-size:10px;color:var(--text3);min-width:28px;text-align:right">${m.expense>0?((amt/m.expense)*100).toFixed(0):0}%</span>
+                </div>
               </div>
-              <div class="progress-bar">
-                <div class="progress-fill" style="width:${(amt/maxCat*100).toFixed(0)}%"></div>
+              <div style="height:5px;background:var(--surface3);border-radius:99px;overflow:hidden">
+                <div style="height:100%;width:${(amt/maxCat*100).toFixed(0)}%;background:${COLORS[i]};border-radius:99px"></div>
               </div>
             </div>
           `).join('')}
-        ` : ''}
-      </div>
-    `;
+        `:'<div style="font-size:13px;color:var(--text3)">Tidak ada pengeluaran</div>'}
+      </div>`;
   }).join('');
 }
+
+function renderWeeklySummary(wrap, now) {
+  const dow = now.getDay();
+  const mon = new Date(now);
+  mon.setDate(now.getDate() - (dow===0?6:dow-1));
+  mon.setHours(0,0,0,0);
+  const thisMonStr = mon.toISOString().slice(0,10);
+  const sub = document.getElementById('summary-subtitle');
+  if (sub) sub.textContent = 'Minggu ini & 7 minggu lalu';
+
+  const weeks = {};
+  state.transactions.forEach(t => {
+    const d = new Date(t.date+'T12:00:00');
+    const dw = d.getDay();
+    const m2 = new Date(d); m2.setDate(d.getDate()-(dw===0?6:dw-1));
+    const key = m2.toISOString().slice(0,10);
+    if (!weeks[key]) weeks[key] = { income:0, expense:0, txCount:0, cats:{} };
+    const w = weeks[key];
+    if (t.type==='income')  { w.income += t.amount; w.txCount++; }
+    if (t.type==='expense') { w.expense += Math.abs(t.amount); w.txCount++;
+      w.cats[t.category||'Lainnya'] = (w.cats[t.category||'Lainnya']||0)+Math.abs(t.amount);
+    }
+  });
+
+  const sorted = Object.entries(weeks).sort((a,b)=>b[0].localeCompare(a[0])).slice(0,8);
+  if (!sorted.length) { wrap.innerHTML='<div class="card" style="text-align:center;padding:32px;color:var(--text3)">Belum ada transaksi</div>'; return; }
+
+  const curW = weeks[thisMonStr]||{income:0,expense:0,txCount:0};
+  const pd2  = new Date(mon); pd2.setDate(pd2.getDate()-7);
+  const prevW = weeks[pd2.toISOString().slice(0,10)]||{income:0,expense:0};
+  renderKPI(curW, prevW);
+
+  wrap.innerHTML = sorted.map(([ms, w]) => {
+    const net = w.income - w.expense;
+    const sun = new Date(ms+'T12:00:00'); sun.setDate(sun.getDate()+6);
+    const isThis = ms===thisMonStr;
+    const cats = Object.entries(w.cats).sort((a,b)=>b[1]-a[1]).slice(0,4);
+    return `
+      <div class="card" style="margin-bottom:14px${isThis?';border-color:rgba(124,111,247,.4)':''}">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+          <div>${isThis ? `<div style="font-size:9px;font-family:'Space Mono',monospace;color:var(--accent);letter-spacing:1px;margin-bottom:4px">▶ MINGGU INI</div>` : ""}
+            <div style="font-weight:700;font-size:14px">${formatDateID(ms)}</div>
+            <div style="font-size:11px;color:var(--text2);margin-top:2px">s/d ${formatDateID(sun.toISOString().slice(0,10))} · ${w.txCount} transaksi</div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:var(--green);font-family:'Space Mono',monospace;font-size:12px">+${fmt(w.income)}</div>
+            <div style="color:var(--red);font-family:'Space Mono',monospace;font-size:12px">-${fmt(w.expense)}</div>
+            <div style="font-weight:700;font-size:15px;color:${net>=0?'var(--green)':'var(--red)'}">${net>=0?'+':''}${fmt(net)}</div>
+          </div>
+        </div>
+        ${cats.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+          ${cats.map(([c,a])=>`<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px">
+            <span style="color:var(--text2)">${c}</span>
+            <span style="color:var(--accent4);font-family:'Space Mono',monospace;font-size:11px;margin-left:5px">${fmtShort(a)}</span>
+          </div>`).join('')}
+        </div>`:''}
+      </div>`;
+  }).join('');
+}
+
+function renderYearlySummary(wrap, now) {
+  const thisYear = now.getFullYear();
+  const sub = document.getElementById('summary-subtitle');
+  if (sub) sub.textContent = thisYear+' vs tahun sebelumnya';
+
+  const years = {};
+  state.transactions.forEach(t => {
+    const key = t.date.slice(0,4);
+    if (!years[key]) years[key] = { income:0, expense:0, months:{} };
+    const y = years[key];
+    if (t.type==='income')  y.income  += t.amount;
+    if (t.type==='expense') { y.expense += Math.abs(t.amount);
+      const mo = t.date.slice(0,7);
+      y.months[mo] = (y.months[mo]||0)+Math.abs(t.amount);
+    }
+  });
+
+  const sorted = Object.entries(years).sort((a,b)=>b[0].localeCompare(a[0]));
+  if (!sorted.length) { wrap.innerHTML='<div class="card" style="text-align:center;padding:32px;color:var(--text3)">Belum ada transaksi</div>'; return; }
+
+  const curY  = years[String(thisYear)]||{income:0,expense:0,months:{}};
+  const prevY = years[String(thisYear-1)]||{income:0,expense:0};
+  renderKPI(curY, prevY);
+
+  wrap.innerHTML = sorted.map(([year, y]) => {
+    const net = y.income - y.expense;
+    const savRate = y.income>0?((net/y.income)*100).toFixed(1):0;
+    const bars = Array.from({length:12},(_,i)=>{
+      return y.months[year+'-'+String(i+1).padStart(2,'0')]||0;
+    });
+    const maxB = Math.max(...bars, 1);
+    return `
+      <div class="card" style="margin-bottom:16px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+          <div>
+            <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800">${year}</div>
+            <div style="font-size:12px;color:var(--text2)">Saving Rate: <strong style="color:${savRate>=20?'var(--green)':parseFloat(savRate)>=0?'var(--accent4)':'var(--red)'}">${savRate}%</strong></div>
+          </div>
+          <div style="text-align:right">
+            <div style="color:var(--green);font-family:'Space Mono',monospace">+${fmt(y.income)}</div>
+            <div style="color:var(--red);font-family:'Space Mono',monospace">-${fmt(y.expense)}</div>
+            <div style="font-weight:800;font-size:18px;color:${net>=0?'var(--green)':'var(--red)'}">${net>=0?'+':''}${fmt(net)}</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:3px;align-items:flex-end;height:56px;margin-bottom:4px">
+          ${bars.map((v,i)=>`<div style="flex:1;height:${v?Math.max((v/maxB*50),3):0}px;background:${v?'linear-gradient(180deg,var(--red),rgba(248,113,113,.3))':'var(--surface3)'};border-radius:3px 3px 0 0" title="${BULAN[i]}: ${fmt(v)}"></div>`).join('')}
+        </div>
+        <div style="display:flex;gap:3px">
+          ${['J','F','M','A','M','J','J','A','S','O','N','D'].map(l=>`<div style="flex:1;text-align:center;font-size:8px;color:var(--text3)">${l}</div>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
 
 // ═══════════════════════════════════════════════════
 // SHOPPING LIST
