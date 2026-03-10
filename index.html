@@ -1415,27 +1415,46 @@
             <div style="display:flex;justify-content:flex-end;margin-bottom:4px">
               <button class="copy-btn" onclick="copyScript()">📋 Copy Script</button>
             </div>
-            <pre class="code-block" id="apps-script">// WalletUS Apps Script v4 — Full Sync + Shopping List
-function doPost(e) {
+            <pre class="code-block" id="apps-script">// WalletUS Apps Script v5 — GET-based (fixes redirect body loss)
+// PENTING: Semua request pakai GET + parameter ?d=... agar tidak kena redirect issue
+
+function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var data = JSON.parse(e.postData.contents);
-    if (data.action === 'get_all')       return getData(ss);
-    if (data.action === 'push_all')      return pushAll(ss, data);
-    if (data.action === 'add_transaction') return addTx(ss, data);
-    if (data.action === 'sync_accounts') { writeAccounts(ss, data.accounts); return ok('accounts synced'); }
-    if (data.action === 'sync_shopping') { writeShopping(ss, data.shoppingLists); return ok('shopping synced'); }
+    var raw = e.parameter.d;
+    // Jika tidak ada parameter → health check
+    if (!raw) return json_({status:'ok', msg:'WalletUS v5 aktif ✓'});
+    var data = JSON.parse(decodeURIComponent(raw));
+    if (data.action === 'get_all')            return getData(ss);
+    if (data.action === 'push_all')           return pushAll(ss, data);
+    if (data.action === 'add_transaction')    return addTx(ss, data);
+    if (data.action === 'update_transaction') return updateTx(ss, data);
+    if (data.action === 'sync_accounts')      { writeAccounts(ss, data.accounts); return ok('accounts synced'); }
+    if (data.action === 'sync_shopping')      { writeShopping(ss, data.shoppingLists); return ok('shopping synced'); }
     if (data.action === 'delete_transaction') return deleteTxAction(ss, data);
     return ok('no action matched');
   } catch(err) { return err_(err); }
 }
-function doGet(e) {
-  return json_({status:'ok', msg:'WalletUS v4 aktif'});
+
+// doPost tetap ada sebagai fallback
+function doPost(e) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var data = JSON.parse(e.postData.contents);
+    if (data.action === 'get_all')            return getData(ss);
+    if (data.action === 'push_all')           return pushAll(ss, data);
+    if (data.action === 'add_transaction')    return addTx(ss, data);
+    if (data.action === 'sync_accounts')      { writeAccounts(ss, data.accounts); return ok('accounts synced'); }
+    if (data.action === 'sync_shopping')      { writeShopping(ss, data.shoppingLists); return ok('shopping synced'); }
+    if (data.action === 'delete_transaction') return deleteTxAction(ss, data);
+    return ok('no action matched');
+  } catch(err) { return err_(err); }
 }
+
 function getData(ss) {
   return json_({status:'ok',
-    transactions: readSheet(ss,'Transactions'),
-    accounts:     readSheet(ss,'Accounts'),
+    transactions:  readSheet(ss,'Transactions'),
+    accounts:      readSheet(ss,'Accounts'),
     shoppingLists: readShoppingSheet(ss)
   });
 }
@@ -1452,6 +1471,17 @@ function addTx(ss, data) {
   s.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',t.accountName||'',t.type||'',t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);
   if (data.accounts) writeAccounts(ss, data.accounts);
   return ok('tx added');
+}
+function updateTx(ss, data) {
+  var s=getOrCreate(ss,'Transactions'), rows=s.getDataRange().getValues(), t=data.tx;
+  for (var i=1;i<rows.length;i++) {
+    if (String(rows[i][0])===String(t.id)) {
+      s.getRange(i+1,1,1,11).setValues([[t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',t.accountName||'',t.type||'',t.amount||0,t.note||'',t.toAccountId||'',t.toAccountName||'']]);
+      break;
+    }
+  }
+  if (data.accounts) writeAccounts(ss, data.accounts);
+  return ok('tx updated');
 }
 function deleteTxAction(ss, data) {
   var s=getOrCreate(ss,'Transactions'), rows=s.getDataRange().getValues();
@@ -1485,7 +1515,7 @@ function readShoppingSheet(ss) {
 }
 function getOrCreate(ss,name){return ss.getSheetByName(name)||ss.insertSheet(name);}
 function ok(msg){return json_({status:'ok',msg:msg});}
-function err_(e){return json_({status:'error',msg:e.toString()});}
+function err_(e){return json_({status:'error',msg:String(e)});}
 function json_(o){return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON);}</pre>
           </div>
 
@@ -2884,25 +2914,34 @@ function saveSheetUrl() {
 }
 
 // PUSH: kirim semua data HP → Sheets
+// ─── Helper utama: kirim ke Apps Script via GET + ?d= ───────────────
+// Alasan: POST body hilang saat Google redirect 302 /exec → /exec?...
+// GET tidak kehilangan parameter saat redirect → selalu works
+async function fetchSheets(payload) {
+  const encoded = encodeURIComponent(JSON.stringify(payload));
+  const url = state.sheetUrl + (state.sheetUrl.includes('?') ? '&' : '?') + 'd=' + encoded;
+  const res  = await fetch(url, { method: 'GET' });
+  const text = await res.text();
+  // Ambil JSON terdalam jika ada wrapper HTML
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('Respons bukan JSON. Cek Apps Script di Google Sheets.');
+  return JSON.parse(m[0]);
+}
+
 async function pushAllToSheets() {
   if (!state.sheetUrl) { toast('Hubungkan ke Sheets dulu!', 'error'); return; }
   setSheetStatus('⬆ Mengirim semua data ke Sheets...', 'info');
   toast('Mengirim data ke Sheets...');
   try {
-    const res = await fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'push_all',
-        transactions: state.transactions,
-        accounts: state.accounts,
-        shoppingLists: state.shoppingLists
-      })
+    const data = await fetchSheets({
+      action: 'push_all',
+      transactions: state.transactions,
+      accounts: state.accounts,
+      shoppingLists: state.shoppingLists
     });
-    const data = await res.json();
     if (data.status === 'ok') {
       state.lastSync = Date.now();
-      saveState();
-      updateSyncStatusUI();
+      saveState(); updateSyncStatusUI();
       setSheetStatus('✓ Semua data berhasil dikirim ke Google Sheets!', 'success');
       toast('Data berhasil dikirim ke Sheets! ✓');
     } else {
@@ -2910,37 +2949,24 @@ async function pushAllToSheets() {
     }
   } catch(e) {
     setSheetStatus('⚠ Gagal push: ' + e.message, 'error');
-    toast('Gagal kirim data: ' + e.message, 'error');
+    toast('Gagal kirim data', 'error');
   }
 }
 
-// PULL: ambil semua data Sheets → HP
 async function pullFromSheets() {
   if (!state.sheetUrl) { toast('Hubungkan ke Sheets dulu!', 'error'); return; }
   setSheetStatus('⬇ Menarik data dari Google Sheets...', 'info');
   toast('Menarik data dari Sheets...');
   try {
-    // Gunakan POST agar tidak kena CORS blocking pada GET dengan redirect
-    const res = await fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'get_all' })
-    });
-    const data = await res.json();
-
-    if (data.status === 'ok') {
+    const data = await fetchSheets({ action: 'get_all' });
+    if (data.status === 'ok' || data.transactions || data.accounts) {
       let changed = false;
       if (data.transactions && data.transactions.length > 0) {
-        state.transactions = data.transactions.map(t => ({
-          ...t,
-          amount: parseFloat(t.amount) || 0
-        }));
+        state.transactions = data.transactions.map(t => ({ ...t, amount: parseFloat(t.amount) || 0 }));
         changed = true;
       }
       if (data.accounts && data.accounts.length > 0) {
-        state.accounts = data.accounts.map(a => ({
-          ...a,
-          balance: parseFloat(a.balance) || 0
-        }));
+        state.accounts = data.accounts.map(a => ({ ...a, balance: parseFloat(a.balance) || 0 }));
         changed = true;
       }
       if (data.shoppingLists && data.shoppingLists.length > 0) {
@@ -2948,71 +2974,47 @@ async function pullFromSheets() {
         changed = true;
       }
       state.lastSync = Date.now();
-      saveState();
-      updateSyncStatusUI();
-      setSheetStatus('✓ Berhasil! ' + state.transactions.length + ' transaksi & ' +
-        state.accounts.length + ' akun ditarik dari Sheets.', 'success');
+      saveState(); updateSyncStatusUI();
+      setSheetStatus('✓ Berhasil! ' + state.transactions.length + ' transaksi & ' + state.accounts.length + ' akun ditarik.', 'success');
       toast('Sync berhasil! ✓');
       if (changed) renderDashboard();
     } else {
       throw new Error(data.msg || 'Sheets kosong atau belum ada data');
     }
   } catch(e) {
-    // Jika fetch error (network/CORS), tampilkan pesan yang jelas
-    const isNetwork = e.message.includes('fetch') || e.message.includes('network') || e.message.includes('Failed');
-    setSheetStatus(
-      isNetwork
-        ? '⚠ Gagal koneksi. Pastikan: (1) URL benar, (2) script sudah di-deploy ulang versi terbaru, (3) ada koneksi internet.'
-        : '⚠ Error: ' + e.message,
-      'error'
-    );
-    toast('Gagal tarik data dari Sheets', 'error');
+    console.error('[WalletUS] Pull error:', e);
+    let hint = '';
+    if (e.message.includes('DOCTYPE') || e.message.includes('not valid JSON') || e.message.includes('bukan JSON')) {
+      hint = ' → Paste ulang kode Apps Script v5, lalu Deploy ulang sebagai New Version.';
+    } else if (e.message.includes('Failed to fetch') || e.message.includes('NetworkError')) {
+      hint = ' → Tidak ada koneksi internet.';
+    }
+    setSheetStatus('⚠ ' + e.message + hint, 'error');
+    toast('Gagal tarik data — lihat detail di halaman Sheets', 'error');
   }
 }
 
-// SYNC per transaksi baru (push 1 transaksi + update akun)
 async function syncToSheets(tx) {
   if (!state.sheetUrl) return;
   try {
-    await fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({
-        action: 'add_transaction',
-        tx: tx,
-        accounts: state.accounts
-      })
-    });
-    state.lastSync = Date.now();
-    saveState();
-    updateSyncStatusUI();
-  } catch(e) {
-    console.log('Sync error (akan dicoba lagi):', e.message);
-  }
+    await fetchSheets({ action: 'add_transaction', tx, accounts: state.accounts });
+    state.lastSync = Date.now(); saveState(); updateSyncStatusUI();
+  } catch(e) { console.log('syncToSheets error:', e.message); }
 }
 
-// Sync akun saja (untuk edit saldo, tambah/hapus akun)
 async function syncAccountsToSheets() {
   if (!state.sheetUrl) return;
   try {
-    await fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'sync_accounts', accounts: state.accounts })
-    });
-    state.lastSync = Date.now();
-    saveState();
+    await fetchSheets({ action: 'sync_accounts', accounts: state.accounts });
+    state.lastSync = Date.now(); saveState();
   } catch(e) {}
 }
 
-// Sync shopping lists
 async function syncShoppingToSheets() {
   if (!state.sheetUrl) return;
   try {
-    await fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'sync_shopping', shoppingLists: state.shoppingLists })
-    });
-    state.lastSync = Date.now();
-    saveState();
+    await fetchSheets({ action: 'sync_shopping', shoppingLists: state.shoppingLists });
+    state.lastSync = Date.now(); saveState();
   } catch(e) {}
 }
 
@@ -3197,16 +3199,11 @@ function exportAllXLSX() {
 async function silentPull() {
   if (!state.sheetUrl) return;
   try {
-    const res = await fetch(state.sheetUrl, {
-      method: 'POST',
-      body: JSON.stringify({ action: 'get_all' })
-    });
-    const data = await res.json();
+    const data = await fetchSheets({ action: 'get_all' });
     if (data.status !== 'ok') return;
 
     let changed = false;
     if (data.transactions && data.transactions.length > 0) {
-      // Hanya update jika data di Sheets lebih baru (lebih banyak)
       if (data.transactions.length !== state.transactions.length) {
         state.transactions = data.transactions.map(t => ({...t, amount: parseFloat(t.amount)||0}));
         changed = true;
@@ -3223,27 +3220,17 @@ async function silentPull() {
     if (data.shoppingLists && data.shoppingLists.length > 0) {
       const sheetsItems = data.shoppingLists.reduce((s,l) => s + (l.items||[]).length, 0);
       const localItems  = state.shoppingLists.reduce((s,l) => s + (l.items||[]).length, 0);
-      if (sheetsItems !== localItems) {
-        state.shoppingLists = data.shoppingLists;
-        changed = true;
-      }
+      if (sheetsItems !== localItems) { state.shoppingLists = data.shoppingLists; changed = true; }
     }
 
+    state.lastSync = Date.now();
+    saveState();
+    updateSyncStatusUI();
     if (changed) {
-      state.lastSync = Date.now();
-      saveState();
-      updateSyncStatusUI();
       renderDashboard();
-      // Kalau sedang di halaman shopping, refresh juga
       const activePage = document.querySelector('.page.active');
       if (activePage && activePage.id === 'page-shopping') renderShopping();
-      console.log('[WalletUS] Auto-sync: data diperbarui');
-      // Toast kecil tanpa mengganggu
       toast('🔄 Data diperbarui dari Sheets');
-    } else {
-      state.lastSync = Date.now();
-      saveState();
-      updateSyncStatusUI();
     }
   } catch(e) {
     console.log('[WalletUS] Silent pull gagal:', e.message);
