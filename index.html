@@ -177,19 +177,50 @@ tr:hover td{background:rgba(255,255,255,.018);}
 /* RESPONSIVE */
 @media(max-width:768px){
   .sidebar{display:none;}
-  .main{margin-left:0;padding:66px 13px 76px;}
+  .main{margin-left:0;padding:62px 12px 80px;width:100%;max-width:100vw;overflow-x:hidden;box-sizing:border-box;}
   .topbar{display:flex;}
   .fab{display:flex;}
   .sg{display:none;}
   .ss{display:flex;}
-  .g2{grid-template-columns:1fr;}
-  .g3{grid-template-columns:1fr 1fr;}
-  .hmob{display:none;}
+  .g2{grid-template-columns:1fr!important;gap:12px;}
+  .g3{grid-template-columns:1fr 1fr;gap:10px;}
+  .hmob{display:none!important;}
   .ph .btn-p{display:none;}
-  .ph{margin-bottom:14px;}
-  .card{padding:13px;}
+  .ph{margin-bottom:12px;}
+  .card{padding:12px;border-radius:12px;}
+  /* Table — scroll horizontal di mobile */
+  .tw{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:10px;}
+  table{min-width:0;width:100%;}
+  td,th{padding:8px 10px;font-size:12px;}
+  /* Modal mobile */
+  .mb{padding:16px 14px;margin:0;border-radius:16px 16px 0 0;position:fixed;bottom:0;left:0;right:0;max-width:100%!important;max-height:90vh;width:100%!important;}
+  .mo{align-items:flex-end;padding:0;}
+  /* KPI summary */
+  #sum-kpi{grid-template-columns:1fr!important;gap:8px;}
+  /* Stats cards mobile */
+  .ss .sc{min-width:120px;padding:12px;}
+  .sv{font-size:14px!important;}
+  .sl{font-size:9px;}
+  /* Page header */
+  .pt{font-size:20px;}
+  .stit{font-size:13px;}
+  /* Pill filter */
+  .fr{gap:5px;}
+  .pill{font-size:11px;padding:4px 10px;}
+  /* Akun card */
+  .acard{padding:10px 12px;gap:9px;}
+  .abal{font-size:12px;}
+  /* Shopping */
+  #shop-tabs{gap:5px;}
+  /* pre code */
+  .pre{font-size:10px;max-height:220px;}
 }
-@media(max-width:440px){.g3{grid-template-columns:1fr;}}
+@media(max-width:440px){
+  .g3{grid-template-columns:1fr;}
+  .main{padding:60px 10px 76px;}
+  .tbs .tb{font-size:11px;padding:7px 4px;}
+  .g2{gap:10px;}
+}
 </style>
 </head>
 <body>
@@ -272,17 +303,8 @@ tr:hover td{background:rgba(255,255,255,.018);}
       <div id="d-accounts">—</div>
     </div>
     <div class="card">
-      <div class="stit">Grafik
-        <div style="display:flex;gap:5px">
-          <div class="pill active" id="c7d" onclick="setChartPeriod('7d',this)" style="font-size:10px;padding:3px 9px">7H</div>
-          <div class="pill" id="c30d" onclick="setChartPeriod('30d',this)" style="font-size:10px;padding:3px 9px">30H</div>
-        </div>
-      </div>
-      <div id="chart-wrap" style="overflow-x:auto"></div>
-      <div style="display:flex;gap:14px;margin-top:8px">
-        <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--tx2)"><div style="width:7px;height:7px;border-radius:2px;background:var(--gr)"></div>Masuk</div>
-        <div style="display:flex;align-items:center;gap:4px;font-size:10px;color:var(--tx2)"><div style="width:7px;height:7px;border-radius:2px;background:var(--rd)"></div>Keluar</div>
-      </div>
+      <div class="stit">Bulan Ini <span id="chart-month-label" class="tag" style="font-size:9px"></span></div>
+      <div id="chart-wrap" style="display:flex;justify-content:center;align-items:center;min-height:180px"></div>
     </div>
   </div>
   <div class="card">
@@ -389,62 +411,83 @@ tr:hover td{background:rgba(255,255,255,.018);}
         </div>
         <div id="sheet-synctime" style="font-size:11px;color:var(--tx3);margin-top:9px"></div>
       </div>
-      <div class="card" style="border-color:rgba(74,222,128,.25);font-size:12px;color:var(--tx2);line-height:1.9">
-        <strong style="color:var(--gr)">✓ Cara Setup:</strong><br>
-        1. Google Sheet → Extensions → Apps Script<br>
-        2. Hapus semua kode lama<br>
-        3. Paste kode v6 dari panel kanan<br>
-        4. Deploy → New Deployment → Web App<br>
+      <div class="card" style="border-color:rgba(74,222,128,.25);font-size:12px;color:var(--tx2);line-height:2">
+        <strong style="color:var(--gr)">✓ Setup Apps Script v7:</strong><br>
+        1. Google Sheet kamu → <b>Extensions → Apps Script</b><br>
+        2. Hapus <b>semua</b> kode lama → paste kode v7 dari panel kanan<br>
+        3. <b>Deploy → New Deployment → Web App</b><br>
         &nbsp;&nbsp;• Execute as: <b>Me</b><br>
         &nbsp;&nbsp;• Who has access: <b>Anyone</b><br>
-        5. Copy URL → paste di atas → Simpan &amp; Hubungkan
+        4. Klik <b>Deploy</b> → copy URL-nya<br>
+        5. Paste URL di atas → <b>Simpan &amp; Hubungkan</b><br>
+        6. Klik 🔍 Test → harus muncul ✓<br>
+        7. Klik ⬇ Tarik Data<br><br>
+        <span style="color:var(--or)">⚠ Jika sudah pernah deploy:</span><br>
+        Manage Deployments → Edit (✏) → <b>New Version</b> → Deploy
       </div>
     </div>
     <div class="card">
-      <div class="stit">📋 Apps Script v6 <button class="btn btn-g btn-sm" onclick="copyScript()">Copy</button></div>
-      <pre class="pre" id="script-code">// WalletUS Apps Script v6
-// Deploy sebagai Web App, Execute as: Me, Who has access: Anyone
+      <div class="stit">📋 Apps Script v7 <button class="btn btn-g btn-sm" onclick="copyScript()">Copy</button></div>
+      <pre class="pre" id="script-code">// WalletUS Apps Script v7
+// ⚠ PENTING: Deploy → New Deployment → Web App
+//   Execute as: Me | Who has access: Anyone
+// Jika sudah pernah deploy: Manage Deployments → Edit → New Version
 
 function doPost(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var contents = e.postData && e.postData.contents ? e.postData.contents : '{}';
-    return route(ss, JSON.parse(contents));
-  } catch(err) { return errResp(err); }
+    var raw = '';
+    if (e.postData && e.postData.contents) {
+      raw = e.postData.contents;
+    } else if (e.parameter && e.parameter.d) {
+      raw = decodeURIComponent(e.parameter.d);
+    }
+    if (!raw || raw === '') raw = '{}';
+    var data = JSON.parse(raw);
+    var result = route(ss, data);
+    return result;
+  } catch(err) {
+    return jsonResp({status:'error', msg: String(err)});
+  }
 }
 
 function doGet(e) {
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var d = e.parameter && e.parameter.d ? decodeURIComponent(e.parameter.d) : '{}';
-    var data = JSON.parse(d);
-    if (!data.action) return jsonResp({status:'ok', msg:'WalletUS v6 aktif'});
+    var raw = '{}';
+    if (e.parameter && e.parameter.d) {
+      raw = decodeURIComponent(e.parameter.d);
+    }
+    var data = JSON.parse(raw);
+    if (!data.action) {
+      return jsonResp({status:'ok', msg:'WalletUS v7 aktif', version:7});
+    }
     return route(ss, data);
-  } catch(err) { return errResp(err); }
+  } catch(err) {
+    return jsonResp({status:'error', msg: String(err)});
+  }
 }
 
 function route(ss, data) {
-  var a = data.action;
+  var a = data.action || '';
   if (a === 'get_all')            return getData(ss);
-  if (a === 'push_all')           return pushAll(ss, data);
+  if (a === 'push_all')           return doPushAll(ss, data);
   if (a === 'add_transaction')    return addTx(ss, data);
   if (a === 'update_transaction') return updateTx(ss, data);
   if (a === 'delete_transaction') return deleteTx(ss, data);
   if (a === 'sync_accounts')      { writeAccounts(ss, data.accounts || []); return okResp('accounts synced'); }
   if (a === 'sync_shopping')      { writeShopping(ss, data.shoppingLists || []); return okResp('shopping synced'); }
-  return okResp('unknown action');
+  return jsonResp({status:'ok', msg:'unknown action: ' + a});
 }
 
 function getData(ss) {
-  return jsonResp({
-    status: 'ok',
-    transactions: readSheet(ss, 'Transactions'),
-    accounts: readSheet(ss, 'Accounts'),
-    shoppingLists: readShopping(ss)
-  });
+  var txs = readSheet(ss, 'Transactions');
+  var accs = readSheet(ss, 'Accounts');
+  var shop = readShopping(ss);
+  return jsonResp({status:'ok', transactions:txs, accounts:accs, shoppingLists:shop});
 }
 
-function pushAll(ss, data) {
+function doPushAll(ss, data) {
   writeTransactions(ss, data.transactions || []);
   writeAccounts(ss, data.accounts || []);
   writeShopping(ss, data.shoppingLists || []);
@@ -453,12 +496,11 @@ function pushAll(ss, data) {
 
 function addTx(ss, data) {
   var s = getOrCreate(ss, 'Transactions');
-  var t = data.tx || {};
-  if (s.getLastRow() === 0) {
+  if (s.getLastRow() === 0)
     s.appendRow(['id','date','desc','category','accountId','accountName','type','amount','note','toAccountId','toAccountName']);
-  }
-  s.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'', t.accountId||'',
-    t.accountName||'', t.type||'', t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
+  var t = data.tx || {};
+  s.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',
+    t.accountName||'',t.type||'',Number(t.amount)||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);
   if (data.accounts) writeAccounts(ss, data.accounts);
   return okResp('tx added');
 }
@@ -469,10 +511,9 @@ function updateTx(ss, data) {
   var t = data.tx || {};
   for (var i = 1; i < rows.length; i++) {
     if (String(rows[i][0]) === String(t.id)) {
-      s.getRange(i+1, 1, 1, 11).setValues([[
-        t.id||'', t.date||'', t.desc||'', t.category||'', t.accountId||'',
-        t.accountName||'', t.type||'', t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||''
-      ]]);
+      s.getRange(i+1,1,1,11).setValues([[t.id||'',t.date||'',t.desc||'',t.category||'',
+        t.accountId||'',t.accountName||'',t.type||'',Number(t.amount)||0,
+        t.note||'',t.toAccountId||'',t.toAccountName||'']]);
       break;
     }
   }
@@ -484,7 +525,7 @@ function deleteTx(ss, data) {
   var s = getOrCreate(ss, 'Transactions');
   var rows = s.getDataRange().getValues();
   for (var i = rows.length - 1; i >= 1; i--) {
-    if (String(rows[i][0]) === String(data.id)) { s.deleteRow(i + 1); break; }
+    if (String(rows[i][0]) === String(data.id)) { s.deleteRow(i+1); break; }
   }
   if (data.accounts) writeAccounts(ss, data.accounts);
   return okResp('tx deleted');
@@ -495,8 +536,8 @@ function writeTransactions(ss, txs) {
   s.clearContents();
   s.appendRow(['id','date','desc','category','accountId','accountName','type','amount','note','toAccountId','toAccountName']);
   txs.forEach(function(t) {
-    s.appendRow([t.id||'', t.date||'', t.desc||'', t.category||'', t.accountId||'',
-      t.accountName||'', t.type||'', t.amount||0, t.note||'', t.toAccountId||'', t.toAccountName||'']);
+    s.appendRow([t.id||'',t.date||'',t.desc||'',t.category||'',t.accountId||'',
+      t.accountName||'',t.type||'',Number(t.amount)||0,t.note||'',t.toAccountId||'',t.toAccountName||'']);
   });
 }
 
@@ -505,25 +546,25 @@ function writeAccounts(ss, accs) {
   s.clearContents();
   s.appendRow(['id','name','balance','type','color']);
   accs.forEach(function(a) {
-    s.appendRow([a.id||'', a.name||'', a.balance||0, a.type||'', a.color||'']);
+    s.appendRow([a.id||'',a.name||'',Number(a.balance)||0,a.type||'',a.color||'']);
   });
 }
 
 function writeShopping(ss, lists) {
   var s = getOrCreate(ss, 'ShoppingLists');
   s.clearContents();
-  s.getRange(1,1).setValue(JSON.stringify(lists || []));
+  s.getRange(1,1).setValue(JSON.stringify(lists||[]));
 }
 
 function readSheet(ss, name) {
   var s = getOrCreate(ss, name);
   if (s.getLastRow() <= 1) return [];
-  var data = s.getDataRange().getValues();
-  var headers = data[0];
+  var vals = s.getDataRange().getValues();
+  var headers = vals[0];
   var out = [];
-  for (var i = 1; i < data.length; i++) {
+  for (var i = 1; i < vals.length; i++) {
     var obj = {};
-    headers.forEach(function(h, j) { obj[h] = data[i][j]; });
+    headers.forEach(function(h,j){ obj[String(h)] = vals[i][j]; });
     if (obj.id) out.push(obj);
   }
   return out;
@@ -532,19 +573,16 @@ function readSheet(ss, name) {
 function readShopping(ss) {
   var s = getOrCreate(ss, 'ShoppingLists');
   if (s.getLastRow() === 0) return [];
-  try {
-    var val = s.getRange(1,1).getValue();
-    return val ? JSON.parse(val) : [];
-  } catch(e) { return []; }
+  try { var v=s.getRange(1,1).getValue(); return v?JSON.parse(String(v)):[];} catch(e){return [];}
 }
 
 function getOrCreate(ss, name) {
   return ss.getSheetByName(name) || ss.insertSheet(name);
 }
-function okResp(m)  { return jsonResp({status:'ok', msg:m}); }
-function errResp(e) { return jsonResp({status:'error', msg:String(e)}); }
+function okResp(m)   { return jsonResp({status:'ok', msg:m}); }
 function jsonResp(o) {
-  return ContentService.createTextOutput(JSON.stringify(o))
+  return ContentService
+    .createTextOutput(JSON.stringify(o))
     .setMimeType(ContentService.MimeType.JSON);
 }</pre>
     </div>
@@ -1510,39 +1548,79 @@ function saveSheetUrl(){
   updateSyncTime();toast('URL disimpan ✓');testConn();
 }
 
-// ── Core fetch — POST text/plain menghindari CORS preflight & body hilang ──
+// ── Core fetch — dual strategy: POST utama + GET fallback ──
 async function sfetch(payload) {
-  if(!state.sheetUrl) return null; // diam saja jika tidak ada URL
+  if(!state.sheetUrl) return null;
   const body=JSON.stringify(payload);
-  let text='';
+
+  // Helper parse respons
+  function parseResp(text){
+    const t=text.trim();
+    if(!t) throw new Error('Respons kosong dari Apps Script');
+    if(t.startsWith('{')||t.startsWith('[')) return JSON.parse(t);
+    // Coba extract JSON dari dalam HTML error Google
+    const m=t.match(/\{[^<>]*"status"[^<>]*\}/);
+    if(m){try{return JSON.parse(m[0]);}catch(e){}}
+    const m2=t.match(/\{[\s\S]{0,2000}\}/);
+    if(m2){try{return JSON.parse(m2[0]);}catch(e){}}
+    if(t.includes('<!DOCTYPE')||t.includes('<html')){
+      if(t.includes('Unauthorized')||t.includes('authorization'))
+        throw new Error('Apps Script belum di-authorize.\nSolusi: Buka URL script sekali di browser, klik Authorize.');
+      if(t.includes('404')||t.includes('not found'))
+        throw new Error('URL tidak ditemukan (404). Pastikan URL deployment yang benar.');
+      throw new Error('Apps Script mengembalikan HTML.\nSolusi: Deploy ulang → New Version → Who has access = Anyone');
+    }
+    throw new Error('Respons tidak valid: '+t.slice(0,120));
+  }
+
+  // Strategy 1: POST dengan Content-Type text/plain (no CORS preflight)
   try {
-    const res=await fetch(state.sheetUrl, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body});
-    text=await res.text();
-  } catch(e) { throw new Error('Koneksi gagal: '+e.message); }
-  const t=text.trim();
-  if(t.startsWith('{')||t.startsWith('[')) return JSON.parse(t);
-  // Coba extract JSON dari HTML error page
-  const m=t.match(/\{[\s\S]*?\}/);
-  if(m){ try{return JSON.parse(m[0]);}catch(e){} }
-  if(t.includes('<!DOCTYPE')||t.includes('<html'))
-    throw new Error('Apps Script mengembalikan HTML bukan JSON.\nSolusi: Paste kode v6, Deploy ulang sebagai New Version, Who has access = Anyone');
-  throw new Error('Respons tidak valid: '+t.slice(0,100));
+    const res=await fetch(state.sheetUrl,{
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body,
+      redirect:'follow'
+    });
+    const text=await res.text();
+    const result=parseResp(text);
+    // Validasi: kalau POST dapat respons health-check (action kosong), retry pakai GET
+    if(payload.action&&result&&result.msg==='WalletUS v6 aktif'&&!result.transactions){
+      throw new Error('POST redirect ke GET — coba GET fallback');
+    }
+    return result;
+  } catch(e1) {
+    // Strategy 2: GET fallback dengan data di query string (untuk payload kecil)
+    if(payload.action==='get_all'||JSON.stringify(payload).length<3000) {
+      try {
+        const enc=encodeURIComponent(body);
+        const url=state.sheetUrl+(state.sheetUrl.includes('?')?'&':'?')+'d='+enc;
+        const res=await fetch(url,{method:'GET',redirect:'follow'});
+        const text=await res.text();
+        return parseResp(text);
+      } catch(e2) {
+        throw new Error('Gagal (POST & GET):\n'+e1.message);
+      }
+    }
+    throw new Error(e1.message);
+  }
 }
 
 async function testConn(){
   if(!state.sheetUrl){toast('URL belum disimpan','err');return;}
-  setStatus('⟳ Menguji koneksi ke Apps Script...','info');
+  setStatus('⟳ Menguji koneksi ke Apps Script v7...','info');
   try{
     const data=await sfetch({action:'get_all'});
-    if(data&&(data.status==='ok'||data.transactions||data.accounts)){
-      const txc=data.transactions?data.transactions.length:0;
-      const acc=data.accounts?data.accounts.length:0;
-      setStatus(`✓ Koneksi OK! Apps Script v6 aktif.\n${txc} transaksi & ${acc} akun ditemukan di Sheets.`,'ok');
+    if(!data) throw new Error('Tidak ada respons');
+    const txc=(data.transactions||[]).length;
+    const acc=(data.accounts||[]).length;
+    const ver=data.version?` (v${data.version})`:'';
+    if(data.status==='ok'||data.transactions!==undefined){
+      setStatus(`✓ Koneksi OK! Apps Script aktif${ver}\n${txc} transaksi & ${acc} akun ditemukan.\n\nSiap digunakan! Klik "Tarik Data" untuk sync.`,'ok');
     } else {
-      setStatus('⚠ Terhubung tapi respons tidak standar:\n'+JSON.stringify(data).slice(0,120),'err');
+      setStatus('⚠ Terhubung tapi respons:\n'+JSON.stringify(data).slice(0,200),'err');
     }
   }catch(e){
-    setStatus('✗ Gagal koneksi:\n'+e.message+'\n\nPastikan: kode v6 sudah di-paste, Deploy ulang (New Version), Who has access = Anyone','err');
+    setStatus(`✗ Gagal: ${e.message}\n\n── Langkah perbaikan ──\n1. Buka Apps Script editor\n2. Hapus semua kode lama → paste kode v7\n3. Deploy → New Deployment → Web App\n   • Execute as: Me\n   • Who has access: Anyone\n4. Copy URL baru → paste ulang di sini\n5. Klik Test lagi`,'err');
   }
 }
 
@@ -1658,4 +1736,4 @@ document.addEventListener('DOMContentLoaded', function() {
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 </body>
-  </html>
+</html>
