@@ -398,7 +398,7 @@ tr:hover td{background:rgba(255,255,255,.018);}
     <div>
       <div class="card" style="margin-bottom:14px">
         <div class="stit">🔗 Koneksi</div>
-        <div class="fg"><label class="fl">URL Apps Script</label><input type="url" id="sheet-url" class="fi" placeholder="https://script.google.com/macros/s/..."></div>
+        <div class="fg"><label class="fl">URL Apps Script</label><input type="url" id="sheet-url" class="fi" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbxR1c9NCxjzzCcDu5SpCSSTuvepKOxw-zxyx5lq4yugjnONlqg162NDnor-qDE9odJcew/exec"></div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
           <button class="btn btn-p" style="flex:1" onclick="saveSheetUrl()">Simpan &amp; Hubungkan</button>
           <button class="btn btn-g" onclick="testConn()">🔍 Test</button>
@@ -700,6 +700,7 @@ function jsonResp(o) {
 // CONSTANTS
 // ═══════════════════════════════════════════════
 const SK = 'walletUS_v3'; // New key — clean slate dari data corrupt lama
+const DEFAULT_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxR1c9NCxjzzCcDu5SpCSSTuvepKOxw-zxyx5lq4yugjnONlqg162NDnor-qDE9odJcew/exec';
 const HARI  = ['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
 const BULAN = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
 const PAL   = ['#7c6ff7','#4ecdc4','#ff6b6b','#ffd93d','#4ade80','#f87171','#60a5fa','#fb923c','#a855f7','#10b981','#06b6d4','#ef4444','#3b82f6','#22c55e','#14b8a6','#78716c'];
@@ -731,7 +732,7 @@ function mkDefaultState() {
     transactions: [],
     shoppingLists: [{id:'sl1',name:'Belanja Minggu Ini',budget:500000,items:[]}],
     activeList: 'sl1',
-    sheetUrl: '',
+    sheetUrl: DEFAULT_SHEET_URL,
     lastSync: null,
   };
 }
@@ -745,7 +746,7 @@ function validateState(s) {
   if (!Array.isArray(s.shoppingLists) || s.shoppingLists.length === 0)
     s.shoppingLists = [{id:'sl1',name:'Belanja Minggu Ini',budget:500000,items:[]}];
   if (!s.activeList) s.activeList = s.shoppingLists[0].id;
-  if (typeof s.sheetUrl !== 'string') s.sheetUrl = '';
+  if (typeof s.sheetUrl !== 'string' || !s.sheetUrl) s.sheetUrl = DEFAULT_SHEET_URL;
   // Validasi setiap akun
   s.accounts = s.accounts.map(a => ({
     id: String(a.id || 'acc_' + Math.random().toString(36).slice(2)),
@@ -1048,6 +1049,50 @@ function txRow(t, actions) {
 // ═══════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════
+function renderDashboard() {
+  const now=new Date();
+  setTxt('d-date', HARI[now.getDay()]+', '+now.getDate()+' '+BULAN[now.getMonth()]+' '+now.getFullYear());
+  const total=state.accounts.reduce((s,a)=>s+(parseFloat(a.balance)||0),0);
+  const ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  const mTx=state.transactions.filter(t=>t.date.startsWith(ym));
+  const inc=mTx.filter(t=>t.type==='income').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
+  const exp=mTx.filter(t=>t.type==='expense').reduce((s,t)=>s+Math.abs(parseFloat(t.amount)||0),0);
+  const net=inc-exp;
+  const nc=net>=0?'var(--gr)':'var(--rd)';
+  const nl=net>=0?'↑ Surplus':'↓ Defisit';
+  // Desktop stats
+  setTxt('ds-total',fmt(total));setTxt('ds-inc',fmt(inc));setTxt('ds-exp',fmt(exp));
+  setTxt('ds-net',fmt(Math.abs(net)));
+  const dn=el('ds-net');if(dn)dn.style.color=nc;
+  const dnl=el('ds-net-l');if(dnl){dnl.style.color=nc;dnl.textContent=nl;}
+  // Mobile stats
+  setTxt('ms-total',fmts(total));setTxt('ms-inc',fmts(inc));setTxt('ms-exp',fmts(exp));
+  setTxt('ms-net',fmts(Math.abs(net)));
+  const mn=el('ms-net');if(mn)mn.style.color=nc;
+  const mnl=el('ms-net-l');if(mnl){mnl.style.color=nc;mnl.textContent=nl;}
+  // Accounts list
+  const da=el('d-accounts');
+  if(da){
+    const list=state.accounts.filter(a=>(parseFloat(a.balance)||0)!==0)
+      .sort((a,b)=>(parseFloat(b.balance)||0)-(parseFloat(a.balance)||0)).slice(0,12);
+    da.innerHTML=list.length?list.map(a=>`
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--bd)">
+        <div style="display:flex;align-items:center;gap:7px">
+          <div style="width:9px;height:9px;border-radius:50%;background:${a.color};flex-shrink:0"></div>
+          <span style="font-size:13px;font-weight:500">${a.name}</span>
+          <span style="font-size:10px;color:var(--tx3)">${a.type}</span>
+        </div>
+        <span style="font-family:'Space Mono',monospace;font-size:12px;white-space:nowrap">${fmt(a.balance)}</span>
+      </div>`).join('')
+      :'<div style="color:var(--tx3);font-size:13px;padding:10px 0">Belum ada saldo</div>';
+  }
+  renderChart();
+  // Recent transactions
+  const dt=el('d-tx');
+  if(dt) dt.innerHTML=state.transactions.slice(0,8).map(t=>txRow(t,false)).join('')||
+    `<tr><td colspan="6" style="text-align:center;color:var(--tx3);padding:22px">Belum ada transaksi</td></tr>`;
+}
+
 function renderChart() {
   const w=el('chart-wrap'); if(!w) return;
   const now=new Date();
@@ -1527,7 +1572,7 @@ function setStatus(msg,type){
   e.textContent=msg;e.className='sbox '+type;e.style.display='block';
 }
 function renderSheetsPage(){
-  const inp=el('sheet-url');if(inp) inp.value=state.sheetUrl||'';
+  const inp=el('sheet-url');if(inp) inp.value=state.sheetUrl||DEFAULT_SHEET_URL||'';
   const sa=el('sheet-actions');
   if(sa) sa.style.display=state.sheetUrl?'flex':'none';
   updateSyncTime();
