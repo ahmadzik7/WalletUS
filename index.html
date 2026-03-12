@@ -1010,91 +1010,73 @@ function txRow(t, actions) {
 // ═══════════════════════════════════════════════
 // DASHBOARD
 // ═══════════════════════════════════════════════
-let chartPd='7d';
-function setChartPeriod(p,btn){
-  chartPd=p;
-  ['c7d','c30d'].forEach(id=>{const e=el(id);if(e)e.classList.remove('active');});
-  if(btn) btn.classList.add('active');
-  renderChart();
-}
-
-function renderDashboard() {
+function renderChart() {
+  const w=el('chart-wrap'); if(!w) return;
   const now=new Date();
-  setTxt('d-date', HARI[now.getDay()]+', '+now.getDate()+' '+BULAN[now.getMonth()]+' '+now.getFullYear());
-  const total=state.accounts.reduce((s,a)=>s+(parseFloat(a.balance)||0),0);
   const ym=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
   const mTx=state.transactions.filter(t=>t.date.startsWith(ym));
   const inc=mTx.filter(t=>t.type==='income').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
   const exp=mTx.filter(t=>t.type==='expense').reduce((s,t)=>s+Math.abs(parseFloat(t.amount)||0),0);
-  const net=inc-exp;
-  const nc=net>=0?'var(--gr)':'var(--rd)';
-  const nl=net>=0?'↑ Surplus':'↓ Defisit';
-  // Desktop
-  setTxt('ds-total',fmt(total));setTxt('ds-inc',fmt(inc));setTxt('ds-exp',fmt(exp));
-  setTxt('ds-net',fmt(Math.abs(net)));
-  const dn=el('ds-net');if(dn)dn.style.color=nc;
-  const dnl=el('ds-net-l');if(dnl){dnl.style.color=nc;dnl.textContent=nl;}
-  // Mobile
-  setTxt('ms-total',fmts(total));setTxt('ms-inc',fmts(inc));setTxt('ms-exp',fmts(exp));
-  setTxt('ms-net',fmts(Math.abs(net)));
-  const mn=el('ms-net');if(mn)mn.style.color=nc;
-  const mnl=el('ms-net-l');if(mnl){mnl.style.color=nc;mnl.textContent=nl;}
+  const sav=Math.max(inc-exp,0);
+  const total=inc+exp||1;
+  const lbl=el('chart-month-label');
+  if(lbl) lbl.textContent=BULAN[now.getMonth()]+' '+now.getFullYear();
 
-  // Accounts
-  const da=el('d-accounts');
-  if(da){
-    const list=state.accounts.filter(a=>(parseFloat(a.balance)||0)!==0).sort((a,b)=>(parseFloat(b.balance)||0)-(parseFloat(a.balance)||0)).slice(0,10);
-    da.innerHTML=list.length?list.map(a=>`
-      <div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--bd)">
-        <div style="display:flex;align-items:center;gap:7px">
-          <div style="width:8px;height:8px;border-radius:50%;background:${a.color}"></div>
-          <span style="font-size:13px;font-weight:500">${a.name}</span>
-          <span style="font-size:10px;color:var(--tx3)">${a.type}</span>
-        </div>
-        <span style="font-family:'Space Mono',monospace;font-size:12px">${fmt(a.balance)}</span>
-      </div>`).join(''):'<div style="color:var(--tx3);font-size:13px;padding:10px 0">Belum ada saldo</div>';
+  const SIZE=170, CX=85, CY=85, R=62, IR=40;
+  function arc(val,tot,startAng,color,label,amount){
+    if(val<=0) return '';
+    const pct=val/tot;
+    const ang=pct*2*Math.PI;
+    const endAng=startAng+ang;
+    const x1=CX+R*Math.sin(startAng),   y1=CY-R*Math.cos(startAng);
+    const x2=CX+R*Math.sin(endAng),     y2=CY-R*Math.cos(endAng);
+    const ix1=CX+IR*Math.sin(startAng), iy1=CY-IR*Math.cos(startAng);
+    const ix2=CX+IR*Math.sin(endAng),   iy2=CY-IR*Math.cos(endAng);
+    const lg=ang>Math.PI?1:0;
+    return `<path d="M${ix1},${iy1} L${x1},${y1} A${R},${R} 0 ${lg} 1 ${x2},${y2} L${ix2},${iy2} A${IR},${IR} 0 ${lg} 0 ${ix1},${iy1} Z"
+      fill="${color}" opacity="0.9"><title>${label}: ${fmt(amount)}</title></path>`;
   }
-  renderChart();
-  // Recent tx
-  const dt=el('d-tx');
-  if(dt) dt.innerHTML=state.transactions.slice(0,8).map(t=>txRow(t,false)).join('')||
-    `<tr><td colspan="6" style="text-align:center;color:var(--tx3);padding:22px">Belum ada transaksi</td></tr>`;
-}
 
-function renderChart() {
-  const w=el('chart-wrap'); if(!w) return;
-  const days=chartPd==='7d'?7:30;
-  const pts=[];
-  for(let i=days-1;i>=0;i--){
-    const d=new Date(); d.setDate(d.getDate()-i);
-    const ds=d.toISOString().slice(0,10);
-    const inc=state.transactions.filter(t=>t.date===ds&&t.type==='income').reduce((s,t)=>s+(parseFloat(t.amount)||0),0);
-    const exp=state.transactions.filter(t=>t.date===ds&&t.type==='expense').reduce((s,t)=>s+Math.abs(parseFloat(t.amount)||0),0);
-    const lbl=days===7?['Min','Sen','Sel','Rab','Kam','Jum','Sab'][d.getDay()]:(parseInt(ds.slice(8))%5===0||parseInt(ds.slice(8))===1?ds.slice(8):'');
-    pts.push({ds,inc,exp,lbl});
+  if(inc===0&&exp===0){
+    w.innerHTML=`<div style="text-align:center;color:var(--tx3);padding:30px 0;font-size:12px">Belum ada transaksi bulan ini</div>`;
+    return;
   }
-  const mx=Math.max(...pts.map(p=>Math.max(p.inc,p.exp)),1);
-  const tInc=pts.reduce((s,p)=>s+p.inc,0);
-  const tExp=pts.reduce((s,p)=>s+p.exp,0);
-  const avgE=tExp/(pts.filter(p=>p.exp>0).length||1);
+
+  const segs=[
+    {val:inc,color:'#4ade80',label:'Pemasukan'},
+    {val:exp,color:'#f87171',label:'Pengeluaran'},
+  ].filter(d=>d.val>0);
+  let svgArcs='',startA=0;
+  segs.forEach(d=>{
+    svgArcs+=arc(d.val,total,startA,d.color,d.label,d.val);
+    startA+=d.val/total*2*Math.PI;
+  });
+
+  const savRate=inc>0?((sav/inc)*100).toFixed(0):0;
   w.innerHTML=`
-    <div style="display:flex;justify-content:space-between;font-size:10px;color:var(--tx3);margin-bottom:7px;font-family:'Space Mono',monospace">
-      <span style="color:var(--gr)">↑ ${fmts(tInc)}</span>
-      <span style="color:var(--rd)">↓ ${fmts(tExp)}</span>
-      <span>avg ${fmts(Math.round(avgE))}/hr</span>
-    </div>
-    <div style="display:flex;gap:${days===7?'8':'3'}px;align-items:flex-end;height:90px;margin-bottom:3px">
-      ${pts.map(p=>{
-        const ih=p.inc?Math.max(p.inc/mx*86,3):0;
-        const eh=p.exp?Math.max(p.exp/mx*86,3):0;
-        return `<div style="flex:1;display:flex;gap:1px;align-items:flex-end;height:86px">
-          <div style="flex:1;height:${ih.toFixed(0)}px;background:linear-gradient(to top,rgba(74,222,128,.3),var(--gr));border-radius:3px 3px 0 0" title="${p.ds}\nMasuk: ${fmt(p.inc)}"></div>
-          <div style="flex:1;height:${eh.toFixed(0)}px;background:linear-gradient(to top,rgba(248,113,113,.3),var(--rd));border-radius:3px 3px 0 0" title="${p.ds}\nKeluar: ${fmt(p.exp)}"></div>
-        </div>`;
-      }).join('')}
-    </div>
-    <div style="display:flex;gap:${days===7?'8':'3'}px">
-      ${pts.map(p=>`<div style="flex:1;text-align:center;font-size:${days===7?'9':'7'}px;color:var(--tx3)">${p.lbl}</div>`).join('')}
+    <div style="display:flex;flex-direction:column;align-items:center;width:100%">
+      <svg width="${SIZE}" height="${SIZE}" viewBox="0 0 ${SIZE} ${SIZE}">
+        ${segs.length===1
+          ?`<circle cx="${CX}" cy="${CY}" r="${R}" fill="${segs[0].color}" opacity=".85"/>
+            <circle cx="${CX}" cy="${CY}" r="${IR}" fill="var(--sf)"/>`
+          :svgArcs+`<circle cx="${CX}" cy="${CY}" r="${IR}" fill="var(--sf)"/>`
+        }
+        <text x="${CX}" y="${CY-7}" text-anchor="middle" fill="var(--tx3)" font-size="9" font-family="Space Mono">NET</text>
+        <text x="${CX}" y="${CY+7}" text-anchor="middle" fill="${inc>=exp?'#4ade80':'#f87171'}" font-size="12" font-weight="700" font-family="Space Mono">${inc>=exp?'+':'-'}${fmts(Math.abs(inc-exp))}</text>
+        <text x="${CX}" y="${CY+19}" text-anchor="middle" fill="var(--tx3)" font-size="8" font-family="Space Mono">saving ${savRate}%</text>
+      </svg>
+      <div style="display:flex;gap:18px;margin-top:8px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="width:10px;height:10px;border-radius:3px;background:#4ade80;flex-shrink:0"></div>
+          <div><div style="font-size:9px;color:var(--tx3);font-family:'Space Mono',monospace">MASUK</div>
+               <div style="font-size:12px;font-weight:700;color:#4ade80;font-family:'Space Mono',monospace">${fmts(inc)}</div></div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div style="width:10px;height:10px;border-radius:3px;background:#f87171;flex-shrink:0"></div>
+          <div><div style="font-size:9px;color:var(--tx3);font-family:'Space Mono',monospace">KELUAR</div>
+               <div style="font-size:12px;font-weight:700;color:#f87171;font-family:'Space Mono',monospace">${fmts(exp)}</div></div>
+        </div>
+      </div>
     </div>`;
 }
 
@@ -1179,7 +1161,7 @@ function doTransfer(){
 // ═══════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════
-let sumPeriod='monthly';
+let sumPeriod='weekly';
 function setSumPeriod(p,btn){
   sumPeriod=p;
   document.querySelectorAll('#page-summary .pill').forEach(x=>x.classList.remove('active'));
