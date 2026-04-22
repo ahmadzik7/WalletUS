@@ -359,10 +359,28 @@ tr:hover td{background:rgba(255,255,255,.018);}
 <!-- SUMMARY -->
 <div id="page-summary" class="page">
   <div class="ph"><div><div class="pt">Summary</div><div class="ps" id="sum-sub">Analisis keuangan</div></div></div>
-  <div class="fr">
-    <div class="pill active" onclick="setSumPeriod('monthly',this)">Bulanan</div>
+  <div class="fr" id="sum-pills">
     <div class="pill" onclick="setSumPeriod('weekly',this)">Mingguan</div>
+    <div class="pill active" onclick="setSumPeriod('monthly',this)">Bulanan</div>
     <div class="pill" onclick="setSumPeriod('yearly',this)">Tahunan</div>
+    <div class="pill" onclick="setSumPeriod('custom',this)">📅 Custom</div>
+  </div>
+  <div id="sum-custom-range" style="display:none;margin-bottom:14px;background:var(--sf);border:1px solid var(--bd);border-radius:12px;padding:13px">
+    <div style="font-size:11px;color:var(--tx2);font-family:'Space Mono',monospace;margin-bottom:9px;text-transform:uppercase;letter-spacing:.5px">Rentang Tanggal</div>
+    <div style="display:flex;gap:9px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px">
+        <label style="font-size:10px;color:var(--tx3)">Dari</label>
+        <input type="date" id="sum-from" class="fi" style="padding:7px 10px;font-size:13px" onchange="renderSummary()">
+      </div>
+      <div style="color:var(--tx3);font-size:18px;padding-top:16px">→</div>
+      <div style="display:flex;flex-direction:column;gap:4px;flex:1;min-width:130px">
+        <label style="font-size:10px;color:var(--tx3)">Sampai</label>
+        <input type="date" id="sum-to" class="fi" style="padding:7px 10px;font-size:13px" onchange="renderSummary()">
+      </div>
+      <button class="btn btn-g btn-sm" onclick="setCustomRangePreset('month')" style="margin-top:16px">Bulan ini</button>
+      <button class="btn btn-g btn-sm" onclick="setCustomRangePreset('last30')" style="margin-top:16px">30 hari</button>
+      <button class="btn btn-g btn-sm" onclick="setCustomRangePreset('year')" style="margin-top:16px">Tahun ini</button>
+    </div>
   </div>
   <div id="sum-kpi" style="display:grid;grid-template-columns:repeat(3,1fr);gap:11px;margin-bottom:18px"></div>
   <div id="sum-body"></div>
@@ -399,7 +417,7 @@ tr:hover td{background:rgba(255,255,255,.018);}
       <div class="card" style="margin-bottom:14px">
         <div class="stit">🔗 Koneksi Apps Script</div>
         <div class="fg"><label class="fl">URL Web App</label>
-          <input type="url" id="sheet-url" class="fi" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbxR1c9NCxjzzCcDu5SpCSSTuvepKOxw-zxyx5lq4yugjnONlqg162NDnor-qDE9odJcew/exec">
+          <input type="url" id="sheet-url" class="fi" placeholder="https://script.google.com/macros/s/AKfycbwFmKtCTl-zKfUaMHqy7_iactbsXIX6HOmF6b9Q7EcIiHIbchUmftXciwukDTJNy8Dx/exec">
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
           <button class="btn btn-p" style="flex:1" onclick="saveSheetUrl()">Simpan &amp; Hubungkan</button>
@@ -879,52 +897,76 @@ function saveTx() {
   var cat=el('tx-cat').value;
   var note=(el('tx-note').value||'').trim();
   var type=curType;
-  if(!date||!amt||amt<=0||!desc||!accId){toast('Lengkapi semua field wajib!','err');return;}
-  var acc=state.accounts.find(function(a){ return a.id===accId; });
+  if(!date||!amt||amt<=0||!desc||!accId){toast('Lengkapi semua field!','err');return;}
+  var acc=state.accounts.find(function(a){return a.id===accId;});
   if(!acc){toast('Akun tidak ditemukan!','err');return;}
 
   if(editId) {
-    var old=state.transactions.find(function(t){ return t.id===editId; }); if(!old) return;
-    var oldAcc=state.accounts.find(function(a){ return a.id===old.accountId; });
+    var old=state.transactions.find(function(t){return t.id===editId;});
+    if(!old){toast('Transaksi tidak ditemukan','err');return;}
+
+    // Langkah 1: Balikkan efek transaksi LAMA sepenuhnya
+    var oldAcc=state.accounts.find(function(a){return a.id===old.accountId;});
     if(oldAcc){
-      if(old.type==='income')        oldAcc.balance -= (parseFloat(old.amount)||0);
-      else if(old.type==='expense')  oldAcc.balance += Math.abs(parseFloat(old.amount)||0);
+      if(old.type==='income')       oldAcc.balance -= (parseFloat(old.amount)||0);
+      else if(old.type==='expense') oldAcc.balance += Math.abs(parseFloat(old.amount)||0);
       else if(old.type==='transfer'){
         oldAcc.balance += Math.abs(parseFloat(old.amount)||0);
-        var ot=state.accounts.find(function(a){ return a.id===old.toAccountId; });
-        if(ot) ot.balance -= Math.abs(parseFloat(old.amount)||0);
+        var oldTo=state.accounts.find(function(a){return a.id===old.toAccountId;});
+        if(oldTo) oldTo.balance -= Math.abs(parseFloat(old.amount)||0);
       }
     }
-    var ntx={id:editId,date:date,desc:desc,accountId:accId,accountName:acc.name,category:cat,note:note,type:type,toAccountId:'',toAccountName:''};
-    if(type==='income'){ntx.amount=amt;acc.balance+=amt;}
-    else if(type==='expense'){ntx.amount=-amt;acc.balance-=amt;}
-    else {
+
+    // Langkah 2: Terapkan transaksi BARU
+    var ntx={id:editId,date:date,desc:desc,accountId:accId,accountName:acc.name,
+             category:cat,note:note,type:type,toAccountId:'',toAccountName:''};
+    if(type==='income'){
+      ntx.amount=amt; acc.balance+=amt;
+    } else if(type==='expense'){
+      ntx.amount=-amt; acc.balance-=amt;
+    } else {
       var toId=el('tx-to').value;
-      var toAcc=state.accounts.find(function(a){ return a.id===toId; });
-      if(!toAcc){toast('Akun tujuan tidak ditemukan!','err');return;}
-      ntx.amount=-amt;ntx.toAccountId=toId;ntx.toAccountName=toAcc.name;
-      acc.balance-=amt;toAcc.balance+=amt;
+      var toAcc=state.accounts.find(function(a){return a.id===toId;});
+      if(!toAcc||toId===accId){toast('Pilih akun tujuan yang berbeda!','err');
+        // Rollback saldo yang sudah di-reverse
+        if(oldAcc){
+          if(old.type==='income')       oldAcc.balance += (parseFloat(old.amount)||0);
+          else if(old.type==='expense') oldAcc.balance -= Math.abs(parseFloat(old.amount)||0);
+          else if(old.type==='transfer'){
+            oldAcc.balance -= Math.abs(parseFloat(old.amount)||0);
+            var rbTo=state.accounts.find(function(a){return a.id===old.toAccountId;});
+            if(rbTo) rbTo.balance += Math.abs(parseFloat(old.amount)||0);
+          }
+        }
+        return;
+      }
+      ntx.amount=-amt; ntx.toAccountId=toId; ntx.toAccountName=toAcc.name;
+      acc.balance-=amt; toAcc.balance+=amt;
     }
-    var idx=state.transactions.findIndex(function(t){ return t.id===editId; });
+    var idx=state.transactions.findIndex(function(t){return t.id===editId;});
     if(idx>=0) state.transactions[idx]=ntx;
     saveState(); pushAll();
     closeModal('tx'); renderDashboard(); renderTransactions();
-    toast('Transaksi diupdate \u2713');
+    toast('Transaksi diupdate ✓');
+
   } else {
-    var tx={id:genId(),date:date,desc:desc,accountId:accId,accountName:acc.name,category:cat,note:note,type:type,toAccountId:'',toAccountName:''};
-    if(type==='income'){tx.amount=amt;acc.balance+=amt;}
-    else if(type==='expense'){tx.amount=-amt;acc.balance-=amt;}
-    else {
+    var tx={id:genId(),date:date,desc:desc,accountId:accId,accountName:acc.name,
+            category:cat,note:note,type:type,toAccountId:'',toAccountName:''};
+    if(type==='income'){
+      tx.amount=amt; acc.balance+=amt;
+    } else if(type==='expense'){
+      tx.amount=-amt; acc.balance-=amt;
+    } else {
       var toId2=el('tx-to').value;
-      var toAcc2=state.accounts.find(function(a){ return a.id===toId2; });
-      if(!toAcc2){toast('Akun tujuan tidak ditemukan!','err');return;}
-      tx.amount=-amt;tx.toAccountId=toId2;tx.toAccountName=toAcc2.name;
-      acc.balance-=amt;toAcc2.balance+=amt;
+      var toAcc2=state.accounts.find(function(a){return a.id===toId2;});
+      if(!toAcc2||toId2===accId){toast('Pilih akun tujuan yang berbeda!','err');return;}
+      tx.amount=-amt; tx.toAccountId=toId2; tx.toAccountName=toAcc2.name;
+      acc.balance-=amt; toAcc2.balance+=amt;
     }
     state.transactions.unshift(tx);
     saveState(); pushAll();
     closeModal('tx'); renderDashboard();
-    toast('Transaksi dicatat \u2713');
+    toast('Transaksi dicatat ✓');
   }
 }
 
@@ -1101,29 +1143,66 @@ function doTransfer(){
   var note=(el('tf-note').value||'').trim();
   var date=el('tf-date').value||today();
   if(!amt||amt<=0){toast('Jumlah tidak valid!','err');return;}
-  if(fromId===toId){toast('Akun asal dan tujuan sama!','err');return;}
-  var from=state.accounts.find(function(a){ return a.id===fromId; });
-  var to=state.accounts.find(function(a){ return a.id===toId; });
+  if(fromId===toId){toast('Akun asal dan tujuan tidak boleh sama!','err');return;}
+  var from=state.accounts.find(function(a){return a.id===fromId;});
+  var to=state.accounts.find(function(a){return a.id===toId;});
   if(!from||!to){toast('Akun tidak ditemukan!','err');return;}
+  if(from.balance < amt){
+    if(!confirm('Saldo '+from.name+' tidak cukup ('+fmt(from.balance)+').\nLanjutkan tetap transfer?')) return;
+  }
   from.balance-=amt; to.balance+=amt;
-  var tx={id:genId(),date:date,desc:note||'Transfer '+from.name+'\u2192'+to.name,category:'Transfer',
-    accountId:fromId,accountName:from.name,toAccountId:toId,toAccountName:to.name,
+  var tx={id:genId(),date:date,
+    desc:note||('Transfer '+from.name+' → '+to.name),
+    category:'Transfer',
+    accountId:fromId,accountName:from.name,
+    toAccountId:toId,toAccountName:to.name,
     amount:-amt,note:note,type:'transfer'};
   state.transactions.unshift(tx);
   saveState(); pushAll();
   el('tf-amt').value=''; el('tf-note').value='';
   renderTransfer(); renderDashboard();
-  toast('Transfer '+fmt(amt)+' berhasil \u2713');
+  toast('Transfer '+fmt(amt)+' berhasil ✓');
 }
 
 // ═══════════════════════════════════════════════
 // SUMMARY
 // ═══════════════════════════════════════════════
-var sumPeriod = 'weekly';
+var sumPeriod = 'monthly';
+
 function setSumPeriod(p,btn){
   sumPeriod=p;
-  document.querySelectorAll('#page-summary .pill').forEach(function(x){ x.classList.remove('active'); });
+  document.querySelectorAll('#sum-pills .pill').forEach(function(x){x.classList.remove('active');});
   if(btn) btn.classList.add('active');
+  // Tampilkan/sembunyikan custom range picker
+  var cr=el('sum-custom-range');
+  if(cr) cr.style.display=(p==='custom'?'block':'none');
+  if(p==='custom'){
+    // Set default range: bulan ini
+    var n=new Date();
+    var y=n.getFullYear(), m=String(n.getMonth()+1).padStart(2,'0');
+    var fromEl=el('sum-from'), toEl=el('sum-to');
+    if(fromEl&&!fromEl.value) fromEl.value=y+'-'+m+'-01';
+    if(toEl&&!toEl.value) toEl.value=n.toISOString().slice(0,10);
+  }
+  renderSummary();
+}
+
+function setCustomRangePreset(preset){
+  var n=new Date();
+  var fromEl=el('sum-from'), toEl=el('sum-to');
+  if(!fromEl||!toEl) return;
+  var y=n.getFullYear(), m=String(n.getMonth()+1).padStart(2,'0');
+  if(preset==='month'){
+    fromEl.value=y+'-'+m+'-01';
+    toEl.value=n.toISOString().slice(0,10);
+  } else if(preset==='last30'){
+    var from=new Date(n); from.setDate(n.getDate()-29);
+    fromEl.value=from.toISOString().slice(0,10);
+    toEl.value=n.toISOString().slice(0,10);
+  } else if(preset==='year'){
+    fromEl.value=y+'-01-01';
+    toEl.value=n.toISOString().slice(0,10);
+  }
   renderSummary();
 }
 
@@ -1131,7 +1210,8 @@ function renderSummary(){
   var now=new Date();
   if(sumPeriod==='weekly')       renderWeekly(now);
   else if(sumPeriod==='monthly') renderMonthlySummary(now);
-  else                           renderYearly(now);
+  else if(sumPeriod==='yearly')  renderYearly(now);
+  else if(sumPeriod==='custom')  renderCustomSummary();
 }
 
 function renderKPI(cur,prev){
@@ -1309,6 +1389,93 @@ function renderYearly(now){
     html+='</div></div>';
     return html;
   }).join('');
+}
+
+function renderCustomSummary(){
+  var fromVal=el('sum-from')?el('sum-from').value:'';
+  var toVal=el('sum-to')?el('sum-to').value:'';
+  if(!fromVal||!toVal){
+    el('sum-body').innerHTML='<div class="card" style="text-align:center;padding:28px;color:var(--tx3)">Pilih rentang tanggal di atas</div>';
+    renderKPI({inc:0,exp:0},{inc:0,exp:0}); return;
+  }
+  var fromD=fromVal, toD=toVal;
+  if(fromD>toD){var tmp=fromD;fromD=toD;toD=tmp;}
+
+  setTxt('sum-sub', fmtDateID(fromD)+' s/d '+fmtDateID(toD));
+
+  var txs=state.transactions.filter(function(t){
+    if(!t.date||t.date.length<10) return false;
+    return t.date>=fromD && t.date<=toD;
+  });
+
+  var inc=txs.filter(function(t){return t.type==='income';}).reduce(function(s,t){return s+(parseFloat(t.amount)||0);},0);
+  var exp=txs.filter(function(t){return t.type==='expense';}).reduce(function(s,t){return s+Math.abs(parseFloat(t.amount)||0);},0);
+  renderKPI({inc:inc,exp:exp},{inc:0,exp:0});
+
+  if(!txs.length){
+    el('sum-body').innerHTML='<div class="card" style="text-align:center;padding:28px;color:var(--tx3)">Tidak ada transaksi di rentang ini</div>';
+    return;
+  }
+
+  // Hitung per kategori
+  var cats={};
+  txs.forEach(function(t){
+    if(t.type==='expense'){
+      var c=t.category||'Lainnya';
+      cats[c]=(cats[c]||0)+Math.abs(parseFloat(t.amount)||0);
+    }
+  });
+  var catList=Object.entries(cats).sort(function(a,b){return b[1]-a[1];}).slice(0,8);
+  var maxC=catList[0]?catList[0][1]:1;
+  var COLS=['var(--ac)','var(--ac2)','var(--or)','var(--gr)','var(--rd)','var(--bl)','var(--ac4)','var(--tx2)'];
+
+  // Hitung per hari
+  var days={};
+  txs.forEach(function(t){
+    if(t.type==='expense') days[t.date]=(days[t.date]||0)+Math.abs(parseFloat(t.amount)||0);
+  });
+  var topDayArr=Object.entries(days).sort(function(a,b){return b[1]-a[1];});
+  var topDay=topDayArr[0]||null;
+
+  // Hitung jumlah hari range
+  var ms1=new Date(fromD+'T12:00:00'), ms2=new Date(toD+'T12:00:00');
+  var nDays=Math.max(1,Math.round((ms2-ms1)/(1000*60*60*24))+1);
+  var net=inc-exp;
+  var savR=inc>0?((Math.max(net,0)/inc)*100).toFixed(1):0;
+
+  var html2='<div class="card" style="margin-bottom:13px">';
+  html2+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:9px;margin-bottom:14px">';
+  html2+='<div style="font-size:12px;color:var(--tx2)"><span style="color:var(--tx);font-weight:700">'+txs.length+'</span> transaksi &nbsp;|&nbsp; <span style="color:var(--tx);font-weight:700">'+nDays+'</span> hari</div>';
+  html2+='<div style="text-align:right"><div style="color:var(--gr);font-family:Space Mono,monospace;font-size:12px">+'+fmt(inc)+'</div><div style="color:var(--rd);font-family:Space Mono,monospace;font-size:12px">-'+fmt(exp)+'</div><div style="font-weight:800;font-size:16px;color:'+(net>=0?'var(--gr)':'var(--rd)')+';">'+(net>=0?'+':'')+fmt(net)+'</div></div>';
+  html2+='</div>';
+  // Mini KPI
+  html2+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:13px">';
+  html2+='<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--tx3);margin-bottom:2px">Saving Rate</div><div style="font-weight:700;font-size:13px;color:'+(savR>=20?'var(--gr)':savR>=0?'var(--ac4)':'var(--rd)')+';">'+savR+'%</div></div>';
+  html2+='<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--tx3);margin-bottom:2px">Avg/Hari</div><div style="font-weight:700;font-size:13px;">'+fmts(Math.round(exp/nDays))+'</div></div>';
+  html2+='<div style="background:var(--sf2);border-radius:9px;padding:8px;text-align:center"><div style="font-size:9px;color:var(--tx3);margin-bottom:2px">Terbesar/Hari</div><div style="font-weight:700;font-size:12px;">'+fmts(topDay?topDay[1]:0)+'</div></div>';
+  html2+='</div>';
+  if(topDay) html2+='<div style="font-size:11px;color:var(--tx3);margin-bottom:11px;padding:5px 9px;background:rgba(251,146,60,.07);border-radius:7px;border-left:3px solid var(--or)">⚠ Pengeluaran terbesar: <b style="color:var(--tx)">'+fmtDateID(topDay[0])+'</b> — '+fmt(topDay[1])+'</div>';
+  if(catList.length){
+    html2+='<div style="font-size:9px;font-family:Space Mono,monospace;color:var(--tx3);letter-spacing:.5px;margin-bottom:8px">TOP PENGELUARAN</div>';
+    catList.forEach(function(c,i){
+      html2+='<div style="margin-bottom:8px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><div style="display:flex;align-items:center;gap:6px"><div style="width:7px;height:7px;border-radius:50%;background:'+COLS[i%8]+';flex-shrink:0"></div>'+c[0]+'</div><div style="display:flex;gap:6px"><span style="font-size:11px;color:var(--tx2)">'+fmt(c[1])+'</span><span style="font-size:10px;color:var(--tx3)">'+(exp>0?((c[1]/exp)*100).toFixed(0):0)+'%</span></div></div><div class="pb"><div class="pf" style="width:'+((c[1]/maxC*100).toFixed(0))+'%;background:'+COLS[i%8]+'"></div></div></div>';
+    });
+  }
+  html2+='</div>';
+
+  // Tabel transaksi
+  html2+='<div class="card" style="margin-top:14px"><div class="stit">Daftar Transaksi <span class="tag">'+txs.length+'</span></div><div class="tw"><table><thead><tr><th>Tanggal</th><th>Deskripsi</th><th class="hmob">Kategori</th><th>Tipe</th><th>Jumlah</th></tr></thead><tbody>';
+  txs.slice(0,50).forEach(function(t){
+    var cls=t.type==='income'?'ai':t.type==='expense'?'ae':'at';
+    var sgn=t.type==='income'?'+':'-';
+    var lbl=t.type==='income'?'Masuk':t.type==='expense'?'Keluar':'Transfer';
+    var lcls=t.type==='income'?'bi':t.type==='expense'?'be':'bt';
+    html2+='<tr><td style="font-size:11px;white-space:nowrap">'+t.date+'</td><td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.desc+'</td><td class="hmob" style="font-size:11px;color:var(--tx2)">'+t.category+'</td><td><span class="bdg '+lcls+'">'+lbl+'</span></td><td class="'+cls+'" style="font-weight:700;white-space:nowrap;font-size:12px;">'+sgn+fmts(Math.abs(parseFloat(t.amount)||0))+'</td></tr>';
+  });
+  if(txs.length>50) html2+='<tr><td colspan="5" style="text-align:center;color:var(--tx3);padding:10px;font-size:12px">... dan '+(txs.length-50)+' transaksi lainnya</td></tr>';
+  html2+='</tbody></table></div></div>';
+
+  el('sum-body').innerHTML=html2;
 }
 
 // ═══════════════════════════════════════════════
