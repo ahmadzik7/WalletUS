@@ -417,7 +417,7 @@ tr:hover td{background:rgba(255,255,255,.018);}
       <div class="card" style="margin-bottom:14px">
         <div class="stit">🔗 Koneksi Apps Script</div>
         <div class="fg"><label class="fl">URL Web App</label>
-          <input type="url" id="sheet-url" class="fi" placeholder="https://script.google.com/macros/s/AKfycbwFmKtCTl-zKfUaMHqy7_iactbsXIX6HOmF6b9Q7EcIiHIbchUmftXciwukDTJNy8Dx/exec">
+          <input type="url" id="sheet-url" class="fi" placeholder="https://script.google.com/macros/s/..." value="https://script.google.com/macros/s/AKfycbwFmKtCTl-zKfUaMHqy7_iactbsXIX6HOmF6b9Q7EcIiHIbchUmftXciwukDTJNy8Dx/exec">
         </div>
         <div style="display:flex;gap:7px;flex-wrap:wrap">
           <button class="btn btn-p" style="flex:1" onclick="saveSheetUrl()">Simpan &amp; Hubungkan</button>
@@ -996,21 +996,25 @@ function txRow(t, actions) {
   var typeLbl=t.type==='income'?'Masuk':t.type==='expense'?'Keluar':'Transfer';
   var typeCls=t.type==='income'?'bi':t.type==='expense'?'be':'bt';
   var acc=t.type==='transfer'?(t.accountName||'?')+' → '+(t.toAccountName||'?'):(t.accountName||'?');
-  var dbl=actions?'editTx("'+t.id+'")':'';
+  var id=t.id;
+  // Tombol aksi — pakai &#39; untuk single-quote agar onclick valid di HTML
   var act=actions
-    ? '<td style="white-space:nowrap"><button onclick="editTx(\"'+t.id+'\")" title="Edit" style="background:none;border:none;color:var(--ac);cursor:pointer;font-size:14px;padding:3px 6px">✎</button><button onclick="deleteTx(\"'+t.id+'\")" title="Hapus" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:13px;padding:3px 6px">✕</button></td>'
+    ? ('<td style="white-space:nowrap">'
+      + '<button onclick="editTx(&#39;' + id + '&#39;)" title="Edit" style="background:none;border:none;color:var(--ac);cursor:pointer;font-size:14px;padding:4px 7px">&#9998;</button>'
+      + '<button onclick="deleteTx(&#39;' + id + '&#39;)" title="Hapus" style="background:none;border:none;color:var(--tx3);cursor:pointer;font-size:13px;padding:4px 7px">&#10005;</button>'
+      + '</td>')
     : '';
-  return [
-    '<tr style="cursor:pointer" ondblclick="'+dbl+'">',
-    '<td style="font-family:Space Mono,monospace;font-size:11px;color:var(--tx2);white-space:nowrap">'+t.date+'</td>',
-    '<td style="font-weight:500;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+t.desc+'</td>',
-    '<td class="hmob" style="font-size:12px;color:var(--tx2)">'+(t.category||'—')+'</td>',
-    '<td class="hmob" style="font-size:12px;color:var(--tx2)">'+acc+'</td>',
-    '<td><span class="bdg '+typeCls+'">'+typeLbl+'</span></td>',
-    '<td class="'+cls+'" style="font-weight:700;white-space:nowrap">'+sgn+fmts(a)+'</td>',
-    act,
-    '</tr>',
-  ].join('');
+  // Badge juga bisa diklik untuk edit
+  var badge='<span class="bdg '+typeCls+'" style="cursor:pointer" onclick="editTx(&#39;'+id+'&#39;)">'+typeLbl+'</span>';
+  return ('<tr style="cursor:pointer" ondblclick="editTx(&#39;'+id+'&#39;)">'
+    + '<td style="font-family:Space Mono,monospace;font-size:11px;color:var(--tx2);white-space:nowrap">'+t.date+'</td>'
+    + '<td style="font-weight:500;max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+t.desc+'">'+t.desc+'</td>'
+    + '<td class="hmob" style="font-size:12px;color:var(--tx2)">'+(t.category||'—')+'</td>'
+    + '<td class="hmob" style="font-size:12px;color:var(--tx2)">'+acc+'</td>'
+    + '<td>'+badge+'</td>'
+    + '<td class="'+cls+'" style="font-weight:700;white-space:nowrap">'+sgn+fmts(a)+'</td>'
+    + act
+    + '</tr>');
 }
 
 // ═══════════════════════════════════════════════
